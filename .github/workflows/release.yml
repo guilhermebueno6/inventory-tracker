@@ -1,0 +1,74 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            alvo: windows
+          - os: macos-latest
+            alvo: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -e ".[dev]"
+
+      - name: Versão da tag
+        shell: bash
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+
+      - name: Build
+        run: pyinstaller packaging/estoque_facil.spec --noconfirm
+
+      - name: Instalador do Windows
+        if: matrix.alvo == 'windows'
+        run: |
+          iscc packaging\windows\installer.iss
+          mkdir artefatos
+          copy Output\*.exe artefatos\
+
+      - name: DMG do macOS
+        if: matrix.alvo == 'macos'
+        run: |
+          bash packaging/macos/build_dmg.sh
+          mkdir artefatos
+          cp dist/*.dmg artefatos/
+
+      - name: SHA256 (o updater confere isto — §10.1)
+        shell: bash
+        run: cd artefatos && shasum -a 256 * > SHA256SUMS && cat SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.alvo }}
+          path: artefatos/*
+
+  publicar:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: tudo
+      - name: Juntar os SHA256SUMS das duas plataformas
+        run: |
+          mkdir -p release
+          find tudo -type f ! -name SHA256SUMS -exec cp {} release/ \;
+          cat tudo/*/SHA256SUMS > release/SHA256SUMS
+          ls -la release
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
