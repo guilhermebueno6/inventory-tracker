@@ -128,9 +128,10 @@ class TelaInicial(QWidget):
 
 
 class JanelaPrincipal(QMainWindow):
-    def __init__(self, session):
+    def __init__(self, session, verificar_atualizacao: bool = True):
         super().__init__()
         self.session = session
+        self._verificador = None
         self.setWindowTitle(APP_NAME)
         self.resize(1080, 720)
 
@@ -150,7 +151,8 @@ class JanelaPrincipal(QMainWindow):
 
         self.importando = False          # nunca atualizar no meio de uma importação
         self._atualizacao_pendente = None
-        self._verificar_atualizacao()
+        if verificar_atualizacao:
+            self._verificar_atualizacao()
 
     def _com_voltar(self, conteudo: QWidget) -> QWidget:
         w = QWidget()
@@ -356,8 +358,22 @@ class JanelaPrincipal(QMainWindow):
             "Os backups automáticos ficam na subpasta 'backups'.",
         )
 
+    def _parar_verificador(self) -> None:
+        """Encerra a checagem de versão antes de fechar.
+
+        Sem isto, fechar a janela enquanto a consulta ao GitHub ainda está no ar
+        destrói uma QThread em execução — e o Qt aborta o processo. Aparece como
+        um fechamento "com erro" para quem está usando.
+        """
+        t = self._verificador
+        if t is not None and t.isRunning():
+            t.requestInterruption()
+            t.quit()
+            t.wait(3000)
+
     def closeEvent(self, evento):
         """Backup silencioso ao fechar (§7.1)."""
+        self._parar_verificador()
         try:
             backup.gerar(self.session, incluir_db=True)
             backup.limpar_antigos()

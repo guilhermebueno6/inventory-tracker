@@ -10,7 +10,8 @@ RAIZ = Path(SPECPATH).parent
 SRC = RAIZ / "src"
 
 a = Analysis(
-    [str(SRC / "estoque_facil" / "__main__.py")],
+    # launcher.py e NÃO estoque_facil/__main__.py: ver o comentário no launcher
+    [str(RAIZ / "packaging" / "launcher.py")],
     pathex=[str(SRC)],
     binaries=[],
     datas=[

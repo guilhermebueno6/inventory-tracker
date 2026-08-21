@@ -12,12 +12,15 @@ AppPublisher=Guilherme Bueno
 DefaultDirName={autopf}\EstoqueFacil
 DefaultGroupName={#Nome}
 OutputBaseFilename=EstoqueFacil-{#Versao}-setup
+; caminho relativo a ESTE arquivo (packaging/windows) -> raiz do repositório
+OutputDir={#SourcePath}\..\..\artefatos
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
-ArchitecturesInstallIn64BitMode=x64compatible
-; A pasta de dados fica em %LOCALAPPDATA%, nunca aqui (ESCOPO.md §3.1)
+; A pasta de dados fica em %LOCALAPPDATA%\EstoqueFacil, NUNCA em {app}.
+; Por isso o desinstalador não encosta no estoque — não acrescente nada aqui
+; que apague {localappdata}\EstoqueFacil.
 UninstallDisplayIcon={app}\EstoqueFacil.exe
 
 [Languages]

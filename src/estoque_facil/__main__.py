@@ -21,7 +21,49 @@ def _configurar_log():
     )
 
 
+def _verificar() -> int:
+    """`--verificar`: abre o banco, aplica migrações e sai. Sem interface.
+
+    É o teste de fumaça do build (pega dependência faltando no pacote, que só
+    apareceria na máquina dela) e um diagnóstico rápido quando algo dá errado.
+    """
+    from .core import db, repo
+    from .core.migracoes import revisao_do_banco
+    from .version import APP_NAME, __version__
+
+    _configurar_log()
+    engine = db.iniciar()
+    with db.sessao() as s:
+        contagem = repo.contar(s)
+    print(f"{APP_NAME} {__version__}")
+    print(f"  pasta de dados: {db.pasta_dados()}")
+    print(f"  revisão do banco: {revisao_do_banco(engine)}")
+    print(f"  produtos: {contagem['total']} ({contagem['kits']} kits)")
+
+    # Carregar o Qt aqui é o que dá valor ao teste de fumaça: a falha mais
+    # provável de empacotamento é a interface não achar seus plugins, e isso
+    # não apareceria só abrindo o banco.
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    from .ui.main_window import JanelaPrincipal
+
+    # sem checar atualização: o teste de fumaça não deve depender de rede
+    janela = JanelaPrincipal(db.sessao(), verificar_atualizacao=False)
+    print(f"  interface: {janela.windowTitle()} carregou")
+    janela.close()
+    app.quit()
+    print("  tudo certo")
+    return 0
+
+
 def main() -> int:
+    if "--verificar" in sys.argv:
+        return _verificar()
+
     from PySide6.QtWidgets import QApplication
 
     from .core import db

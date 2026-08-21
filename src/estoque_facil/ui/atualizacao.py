@@ -110,6 +110,7 @@ class DialogoAtualizacao(QDialog):
 
     def _baixar(self) -> None:
         self.bt_agora.setEnabled(False)
+        self.bt_depois.setEnabled(False)      # não sair no meio do download
         self.barra.setVisible(True)
         self.lb_status.setText("Baixando a nova versão…")
 
@@ -125,6 +126,7 @@ class DialogoAtualizacao(QDialog):
     def _erro(self, mensagem: str) -> None:
         self.barra.setVisible(False)
         self.bt_agora.setEnabled(True)
+        self.bt_depois.setEnabled(True)
         self.lb_status.setText("Não consegui baixar a atualização.")
         avisar(
             self,
@@ -133,6 +135,13 @@ class DialogoAtualizacao(QDialog):
             "normalmente. Você pode tentar de novo depois.",
             detalhe_tecnico=mensagem,
         )
+
+    def closeEvent(self, evento):
+        """Mesmo cuidado da janela principal: não destruir thread em execução."""
+        if self._thread is not None and self._thread.isRunning():
+            self._thread.quit()
+            self._thread.wait(3000)
+        super().closeEvent(evento)
 
     def _aplicar(self, caminho) -> None:
         self.lb_status.setText("Abrindo o instalador. O app vai fechar.")

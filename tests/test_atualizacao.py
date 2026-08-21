@@ -129,3 +129,25 @@ def test_nao_atualiza_no_meio_de_uma_importacao(app, session, monkeypatch):
     j.abrir_atualizacao()
     assert chamou, "precisa avisar em vez de abrir"
     assert "importação" in chamou[0][2].lower()
+
+
+def test_fechar_a_janela_durante_a_verificacao_nao_derruba_o_app(app, session):
+    """O Qt aborta o processo se uma QThread for destruída em execução.
+
+    Aparecia como fechamento "com erro" logo depois de abrir o app — e foi o
+    teste de fumaça do executável empacotado que revelou (exit code 134).
+    """
+    from estoque_facil.ui.main_window import JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=True)
+    assert j._verificador is not None
+    j.close()
+    assert not j._verificador.isRunning(), "a thread precisa ter parado antes de fechar"
+
+
+def test_janela_pode_abrir_sem_checar_atualizacao(app, session):
+    from estoque_facil.ui.main_window import JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+    assert j._verificador is None
+    j.close()
