@@ -27,26 +27,78 @@ jobs:
         shell: bash
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
 
+      # Se a tag e o version.py divergirem, o app instalado compara a versão
+      # dele com a do release, nunca fica igual, e passa a oferecer atualização
+      # para sempre. Melhor falhar aqui do que descobrir na máquina dela.
+      - name: A tag precisa bater com o version.py
+        shell: bash
+        run: |
+          NO_CODIGO=$(python -c "from estoque_facil.version import __version__; print(__version__)")
+          if [ "$NO_CODIGO" != "$APP_VERSION" ]; then
+            echo "A tag diz v$APP_VERSION, mas version.py diz $NO_CODIGO."
+            echo "Ajuste src/estoque_facil/version.py e marque a tag de novo."
+            exit 1
+          fi
+          echo "versão conferida: $APP_VERSION"
+
       - name: Build
         run: pyinstaller packaging/estoque_facil.spec --noconfirm
 
+      # Sem isto, um erro de empacotamento só apareceria na máquina dela.
+      # Foi assim que passou despercebido que o app nem abria.
+      - name: Teste de fumaça do executável (Windows)
+        if: matrix.alvo == 'windows'
+        run: .\dist\EstoqueFacil\EstoqueFacil.exe --verificar
+
+      - name: Teste de fumaça do executável (macOS)
+        if: matrix.alvo == 'macos'
+        run: ./dist/EstoqueFacil/EstoqueFacil --verificar
+
       - name: Instalador do Windows
         if: matrix.alvo == 'windows'
+        shell: pwsh
         run: |
-          iscc packaging\windows\installer.iss
-          mkdir artefatos
-          copy Output\*.exe artefatos\
+          # O runner do windows-latest já traz o Inno Setup no PATH (confirmado
+          # no build v0.1.1). O caminho fixo e o choco ficam só como reserva,
+          # para o dia em que a imagem do runner mudar.
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            Write-Host "Inno Setup ausente — instalando"
+            choco install innosetup -y --no-progress
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) { throw "ISCC.exe não encontrado" }
+
+          # NÃO criar a pasta artefatos aqui: quem a cria é o OutputDir do
+          # installer.iss. Um `mkdir artefatos` depois disso falha porque ela
+          # já existe — foi o que derrubou o build da v0.1.1.
+          & $iscc packaging\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC falhou" }
+          Get-ChildItem artefatos
 
       - name: DMG do macOS
         if: matrix.alvo == 'macos'
         run: |
           bash packaging/macos/build_dmg.sh
-          mkdir artefatos
+          mkdir -p artefatos
           cp dist/*.dmg artefatos/
 
+      # shasum não é confiável entre Windows e macOS; python está garantido aqui
       - name: SHA256 (o updater confere isto — §10.1)
         shell: bash
-        run: cd artefatos && shasum -a 256 * > SHA256SUMS && cat SHA256SUMS
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib
+          pasta = pathlib.Path("artefatos")
+          linhas = [
+              f"{hashlib.sha256(a.read_bytes()).hexdigest()}  {a.name}"
+              for a in sorted(pasta.iterdir())
+              if a.is_file() and a.name != "SHA256SUMS"
+          ]
+          (pasta / "SHA256SUMS").write_text("\n".join(linhas) + "\n")
+          print("\n".join(linhas))
+          PY
 
       - uses: actions/upload-artifact@v4
         with:
@@ -62,12 +114,13 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: tudo
-      - name: Juntar os SHA256SUMS das duas plataformas
+      - name: Juntar os artefatos das duas plataformas
         run: |
           mkdir -p release
           find tudo -type f ! -name SHA256SUMS -exec cp {} release/ \;
           cat tudo/*/SHA256SUMS > release/SHA256SUMS
           ls -la release
+          test -s release/SHA256SUMS || { echo "SHA256SUMS vazio"; exit 1; }
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
