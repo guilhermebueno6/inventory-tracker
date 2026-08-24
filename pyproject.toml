@@ -26,6 +26,18 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# A folha de estilo e a pasta da marca (fonte Archivo, símbolo, ícones e as
+# setas do QSS) não são .py, então não entram no wheel sozinhas — sem isto o
+# app instalado abre com a fonte do sistema e sem ícone.
+[tool.setuptools.package-data]
+estoque_facil = [
+    "ui/*.qss",
+    "resources/*.ico",
+    "resources/*.icns",
+    "resources/fontes/*",
+    "resources/marca/*",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]

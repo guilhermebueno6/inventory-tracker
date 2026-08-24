@@ -20,14 +20,24 @@ from PySide6.QtWidgets import (
 
 from ..core import exclusao, kits, repo
 from ..core.models import Produto, TipoProduto
+from . import marca
 from .dialogos import excluir_produto, reativar_produto
 from .tela_produto import TelaProduto
-from .widgets.comuns import celula, configurar_colunas, dica, titulo
+from .widgets.comuns import (
+    celula,
+    celula_numero,
+    configurar_colunas,
+    dica,
+    regua,
+    titulo,
+)
 
-COR_ALERTA = QColor("#b3261e")
-COR_ATENCAO = QColor("#8a5300")
-COR_KIT = QColor("#2f4f8f")
-COR_ARQUIVADO = QColor("#6b6b6b")
+# Paleta mono do manual §03: o que pede ação é o vermelho escuro, o resto é
+# tinta e cinza. Kit deixou de ser azul — a diferença entre kit e item passou
+# a ser o peso da letra, que é o recurso que a marca oferece.
+COR_ALERTA = QColor(marca.VERMELHO_ESCURO)
+COR_ATENCAO = QColor(marca.CINZA)
+COR_ARQUIVADO = QColor(marca.DESABILITADO)
 
 FILTRO_ARQUIVADOS = "Arquivados"
 
@@ -40,8 +50,10 @@ class TelaEstoque(QWidget):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
         lay.addWidget(titulo("Estoque"))
+        lay.addWidget(regua())
 
         topo = QHBoxLayout()
+        topo.setSpacing(10)
         self.busca = QLineEdit()
         self.busca.setObjectName("busca")
         self.busca.setPlaceholderText("Procurar por nome ou código…")
@@ -143,13 +155,14 @@ class TelaEstoque(QWidget):
             self.tabela.setItem(linha, 1, celula(p.rotulo))
 
             tipo_item = QTableWidgetItem("Kit" if p.eh_kit else "Item")
-            if p.eh_kit:
-                tipo_item.setForeground(QBrush(COR_KIT))
+            tipo_item.setFont(marca.fonte(marca.CORPO, 700 if p.eh_kit else 400))
+            if not p.eh_kit:
+                tipo_item.setForeground(QBrush(QColor(marca.CINZA)))
             self.tabela.setItem(linha, 2, tipo_item)
 
             texto = f"Dá para montar {d.quantidade}" if p.eh_kit else str(d.quantidade)
-            item_qtd = QTableWidgetItem(texto)
-            item_qtd.setTextAlignment(Qt.AlignCenter)
+            # tabular: sem isto a coluna de quantidade desalinha a cada linha
+            item_qtd = celula_numero(texto, Qt.AlignRight | Qt.AlignVCenter)
 
             obs = ""
             if not p.ativo:

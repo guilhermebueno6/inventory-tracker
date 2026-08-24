@@ -1,113 +1,330 @@
-/* Estoque Fácil — ESCOPO.md §6.
-   Fonte base 14pt e alvos de clique de 40px+ são requisito, não estética. */
+/* Estoque Fácil — manual da marca §03 a §05.
+
+   Os nomes entre arrobas são substituídos em marca.folha_de_estilo(). Não
+   escreva hex de cor nem nome de fonte aqui: o valor mora em marca.py.
+
+   Três regras do sistema Modernist mandam neste arquivo:
+     • border-radius é sempre 0 — nada de canto arredondado, em lugar nenhum;
+     • a régua de 2px é o único elemento estrutural (separa, marca ativo, foca);
+     • o vermelho aparece pouco: ação primária, foco e ênfase pequena.
+
+   O corpo a 14pt e os alvos de clique de 40px+ vêm do ESCOPO.md §6 e não são
+   estética: são requisito de acessibilidade e mandam quando há conflito. */
 
 QWidget {
-    font-size: 14pt;
-    color: #1c1c1e;
-    background: #f5f5f7;
+    font-family: @FONTE@;
+    font-size: @CORPO@;
+    color: @TINTA@;
+    background: @FUNDO@;
 }
-QMainWindow, QDialog { background: #f5f5f7; }
+QMainWindow, QDialog { background: @FUNDO@; }
 
-QLabel#titulo      { font-size: 24pt; font-weight: 600; }
-QLabel#subtitulo   { font-size: 15pt; color: #555; }
-QLabel#secao       { font-size: 16pt; font-weight: 600; margin-top: 8px; }
-QLabel#dica        { font-size: 12pt; color: #666; }
+/* Rótulo nunca pinta fundo próprio: dentro de cartão e de faixa a cor do
+   QWidget global aparecia como uma tarja cinza atrás do texto. */
+QLabel { background: transparent; }
+
+/* ------------------------------------------------------------ tipografia */
+
+QLabel#display {
+    font-size: @DISPLAY@; font-weight: 700; letter-spacing: -1.4px;
+}
+QLabel#titulo {
+    font-size: @TITULO@; font-weight: 700; letter-spacing: -0.65px;
+}
+QLabel#subtitulo {
+    font-size: @SUBTITULO@; font-weight: 600; letter-spacing: -0.18px;
+    color: @CINZA@;
+}
+QLabel#secao {
+    font-size: @ROTULO@; font-weight: 700; letter-spacing: 2.2px;
+    color: @CINZA@; margin-top: 4px;
+}
+QLabel#rotulo {
+    font-size: @ROTULO@; font-weight: 700; letter-spacing: 2.2px; color: @CINZA@;
+}
+QLabel#dica     { font-size: @ROTULO@; color: @CINZA@; }
+/* Título dentro do cartão da tela inicial (o QLabel filho de CartaoBotao). */
+QLabel#subtituloCartao {
+    font-size: @SUBTITULO@; font-weight: 600; letter-spacing: -0.18px;
+    color: @TINTA@; background: transparent;
+}
+/* A frase da faixa: um degrau acima do corpo, porque é o que se lê primeiro. */
+QLabel#textoFaixa { font-weight: 600; background: transparent; }
+QLabel#numero   { font-size: @NUMERO@; font-weight: 700; letter-spacing: -0.7px; }
+QLabel#numeroNegativo {
+    font-size: @NUMERO@; font-weight: 700; letter-spacing: -0.7px;
+    color: @VERMELHO_ESCURO@;
+}
+
+QLabel#ok       { font-weight: 700; }
+QLabel#atencao  { font-weight: 700; color: @CINZA@; }
+QLabel#erro     { font-weight: 700; color: @VERMELHO_ESCURO@; }
+
+/* A régua de 2px do manual, como widget: QFrame com este nome. */
+QFrame#regua      { background: @TINTA@; border: none; max-height: 2px; min-height: 2px; }
+QFrame#reguaClara { background: @LINHA@; border: none; max-height: 1px; min-height: 1px; }
+
+/* ---------------------------------------------------------------- botões */
+/* Texto à esquerda inclusive dentro do botão — manual §04. */
 
 QPushButton {
-    background: #ffffff;
-    border: 1px solid #c9c9cf;
-    border-radius: 8px;
-    padding: 10px 18px;
+    background: @SUPERFICIE@;
+    color: @TINTA@;
+    border: 2px solid @TINTA@;
+    border-radius: 0;
+    padding: 9px 15px;
     min-height: 40px;
+    font-weight: 700;
+    text-align: left;
 }
-QPushButton:hover   { background: #eef2ff; border-color: #6f86ff; }
-QPushButton:pressed { background: #dfe6ff; }
-QPushButton:disabled{ color: #9a9aa0; background: #ececf0; }
+QPushButton:hover   { background: @TINTA@; color: @SUPERFICIE@; }
+QPushButton:pressed { background: #000000; color: @SUPERFICIE@; }
+QPushButton:disabled{
+    background: @FUNDO@; color: @DESABILITADO@; border-color: @LINHA@;
+}
+QPushButton:focus   { border-color: @VERMELHO@; }
 
 QPushButton#primario {
-    background: #2f6df6; color: white; border: none; font-weight: 600;
-    min-height: 48px; padding: 12px 26px;
+    background: @VERMELHO@; color: @SUPERFICIE@; border: 2px solid @VERMELHO@;
+    min-height: 48px; padding: 11px 20px;
 }
-QPushButton#primario:hover   { background: #2559d0; }
-QPushButton#primario:disabled{ background: #b9c7e8; }
+QPushButton#primario:hover   { background: @VERMELHO_ESCURO@; border-color: @VERMELHO_ESCURO@; }
+QPushButton#primario:pressed { background: @VERMELHO_ESCURO@; border-color: @TINTA@; }
+QPushButton#primario:disabled{
+    background: @FUNDO@; color: @DESABILITADO@; border-color: @LINHA@;
+}
+QPushButton#primario:focus   { border-color: @TINTA@; }
 
-QPushButton#perigo { background: #ffffff; color: #b3261e; border-color: #e5a29c; }
-QPushButton#perigo:hover { background: #fdecea; }
+/* Destrutivo: contorno tinta, palavra em vermelho escuro. O vermelho cheio
+   fica reservado para a ação primária — no manual ele é usado com parcimônia. */
+QPushButton#perigo {
+    background: @SUPERFICIE@; color: @VERMELHO_ESCURO@; border: 2px solid @TINTA@;
+}
+QPushButton#perigo:hover   { background: @VERMELHO_ESCURO@; color: @SUPERFICIE@;
+                             border-color: @VERMELHO_ESCURO@; }
+QPushButton#perigo:pressed { background: @VERMELHO_ESCURO@; color: @SUPERFICIE@; }
 
+/* Botão discreto: sem moldura, para ações de apoio dentro de tabela e rodapé. */
+QPushButton#discreto {
+    background: transparent; border: 2px solid transparent; color: @CINZA@;
+    padding: 6px 10px; min-height: 32px;
+}
+QPushButton#discreto:hover { background: transparent; color: @TINTA@;
+                             border-bottom-color: @TINTA@; }
+
+/* Navegação da barra de título: rótulo caixa alta — manual §05. */
+QPushButton#nav {
+    background: transparent; border: none;
+    border-bottom: 2px solid transparent;
+    color: @CINZA@;
+    font-size: @ROTULO@; font-weight: 700; letter-spacing: 2.2px;
+    padding: 6px 2px; margin: 0 14px 0 0; min-height: 28px;
+}
+QPushButton#nav:hover     { background: transparent; color: @TINTA@; }
+QPushButton#nav:pressed   { background: transparent; color: @VERMELHO_ESCURO@; }
+QPushButton#nav[ativo="true"] {
+    color: @TINTA@; border-bottom-color: @VERMELHO@;
+}
+
+/* Cartões da tela inicial: superfície branca, hairline, régua vermelha no hover. */
 QPushButton#cartao {
-    background: #ffffff; border: 1px solid #d9d9e0; border-radius: 14px;
-    padding: 26px; font-size: 17pt; font-weight: 600; min-height: 120px;
-    text-align: center;
+    background: @SUPERFICIE@;
+    border: 1px solid @LINHA@;
+    border-left: 2px solid @LINHA@;
+    padding: 20px 22px;
+    min-height: 92px;
+    text-align: left;
+    font-weight: 700;
 }
-QPushButton#cartao:hover { background: #eef2ff; border-color: #2f6df6; }
+QPushButton#cartao:hover {
+    background: @SUPERFICIE@; color: @TINTA@;
+    border-color: @LINHA@; border-left-color: @VERMELHO@;
+}
+QPushButton#cartao:pressed { background: @FUNDO@; color: @TINTA@; }
+QPushButton#cartao:focus   { border-color: @TINTA@; border-left-color: @VERMELHO@; }
 
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit {
-    background: white; border: 1px solid #c9c9cf; border-radius: 8px;
-    padding: 8px 10px; min-height: 34px;
-}
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
-    border: 2px solid #2f6df6;
-}
-QLineEdit#busca { font-size: 16pt; padding: 12px 14px; }
+/* ---------------------------------------------------------------- campos */
 
-QTableView {
-    background: white; border: 1px solid #d9d9e0; border-radius: 10px;
-    gridline-color: #ececf0; selection-background-color: #dbe6ff;
-    selection-color: #1c1c1e;
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QDateEdit, QPlainTextEdit {
+    background: @SUPERFICIE@;
+    border: 2px solid @LINHA@;
+    border-radius: 0;
+    padding: 7px 10px;
+    min-height: 34px;
+    selection-background-color: @TINTA@;
+    selection-color: @SUPERFICIE@;
 }
-QTableView::item { padding: 8px; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus,
+QDoubleSpinBox:focus, QTextEdit:focus, QDateEdit:focus {
+    border-color: @VERMELHO@;
+}
+QLineEdit:disabled, QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {
+    background: @FUNDO@; color: @DESABILITADO@;
+}
+QLineEdit#busca { font-size: @SUBTITULO@; padding: 11px 14px; min-height: 44px; }
+
+QComboBox::drop-down, QDateEdit::drop-down { border: none; width: 28px; }
+QComboBox::down-arrow, QDateEdit::down-arrow {
+    image: url(@SETA_BAIXO@); width: 10px; height: 6px;
+}
+QComboBox::down-arrow:disabled, QDateEdit::down-arrow:disabled { image: none; }
+QComboBox QAbstractItemView {
+    background: @SUPERFICIE@; border: 2px solid @TINTA@;
+    selection-background-color: @TINTA@; selection-color: @SUPERFICIE@;
+    outline: none; padding: 2px;
+}
+
+/* --------------------------------------------------------------- tabelas */
+/* Cabeçalho em rótulo caixa alta sobre a régua de 2px — manual §04 e §05. */
+
+QTableView, QTableWidget {
+    background: @SUPERFICIE@;
+    border: 1px solid @LINHA@;
+    border-radius: 0;
+    gridline-color: @LINHA_CLARA@;
+    selection-background-color: @SELECAO@;
+    selection-color: @TINTA@;
+    alternate-background-color: @FUNDO@;
+}
+QTableView::item, QTableWidget::item { padding: 7px 8px; border: none; }
+QTableView::item:selected, QTableWidget::item:selected { background: @SELECAO@; }
+
+QHeaderView { background: @SUPERFICIE@; }
 QHeaderView::section {
-    background: #eceef4; padding: 10px; border: none;
-    border-right: 1px solid #dcdce4; font-weight: 600;
+    background: @SUPERFICIE@;
+    color: @CINZA@;
+    font-size: @ROTULO@; font-weight: 700; letter-spacing: 1.6px;
+    padding: 10px 8px;
+    border: none;
+    border-bottom: 2px solid @TINTA@;
+    text-align: left;
 }
+QTableCornerButton::section { background: @SUPERFICIE@; border: none;
+                              border-bottom: 2px solid @TINTA@; }
+
+/* ---------------------------------------------------------------- faixas */
+/* Aviso e resultado: superfície branca com régua de 2px à esquerda. */
 
 QFrame#faixaAlerta {
-    background: #fff4e5; border: 1px solid #f0c99a; border-radius: 10px; padding: 4px;
+    background: @SUPERFICIE@;
+    border: 1px solid @LINHA@;
+    border-left: 2px solid @VERMELHO@;
+    border-radius: 0;
 }
 QFrame#faixaOk {
-    background: #e8f5e9; border: 1px solid #a5d6a7; border-radius: 10px; padding: 4px;
+    background: @SUPERFICIE@;
+    border: 1px solid @LINHA@;
+    border-left: 2px solid @TINTA@;
+    border-radius: 0;
 }
+QFrame#faixaAlerta QLabel, QFrame#faixaOk QLabel { background: transparent; }
+
 QFrame#cartaoInfo {
-    background: white; border: 1px solid #d9d9e0; border-radius: 10px;
+    background: @SUPERFICIE@; border: 1px solid @LINHA@; border-radius: 0;
 }
+QFrame#cartaoInfo QLabel { background: transparent; }
 
-QLabel#ok       { color: #1b5e20; font-weight: 600; }
-QLabel#atencao  { color: #8a5300; font-weight: 600; }
-QLabel#erro     { color: #b3261e; font-weight: 600; }
+/* Barra de título do aplicativo — manual §05. */
+QFrame#barraTitulo {
+    background: @SUPERFICIE@;
+    border: none;
+    border-bottom: 2px solid @TINTA@;
+}
+QFrame#barraTitulo QLabel, QFrame#barraTitulo QWidget { background: transparent; }
 
-QTabWidget::pane { border: 1px solid #d9d9e0; border-radius: 10px; background: white; }
+/* ------------------------------------------------------------------ abas */
+
+QTabWidget::pane {
+    border: 1px solid @LINHA@; border-top: 2px solid @TINTA@;
+    border-radius: 0; background: @SUPERFICIE@; top: -2px;
+}
+QTabBar { background: transparent; }
 QTabBar::tab {
-    padding: 10px 20px; margin-right: 4px; background: #e6e6ec;
-    border-top-left-radius: 8px; border-top-right-radius: 8px; min-height: 30px;
+    background: transparent;
+    color: @CINZA@;
+    font-size: @ROTULO@; font-weight: 700; letter-spacing: 1.6px;
+    padding: 9px 16px; margin: 0 18px 0 0; min-height: 26px;
+    border: none; border-bottom: 2px solid transparent;
 }
-QTabBar::tab:selected { background: white; font-weight: 600; }
+QTabBar::tab:hover     { color: @TINTA@; }
+QTabBar::tab:selected  { color: @TINTA@; border-bottom-color: @VERMELHO@; }
 
-QScrollBar:vertical { width: 14px; background: transparent; }
-QScrollBar::handle:vertical { background: #c4c4cc; border-radius: 7px; min-height: 30px; }
-QSTATUSBAR { font-size: 12pt; }
+/* ----------------------------------------------------------------- menus */
+
+QMenuBar { background: @SUPERFICIE@; border: none; padding: 2px 8px; }
+QMenuBar::item {
+    background: transparent; padding: 7px 12px;
+    border-bottom: 2px solid transparent;
+}
+QMenuBar::item:selected { background: transparent; border-bottom-color: @VERMELHO@; }
+QMenu {
+    background: @SUPERFICIE@; border: 2px solid @TINTA@; border-radius: 0; padding: 4px 0;
+}
+QMenu::item { padding: 9px 26px; }
+QMenu::item:selected { background: @TINTA@; color: @SUPERFICIE@; }
+QMenu::separator { height: 1px; background: @LINHA@; margin: 5px 0; }
+
+/* --------------------------------------------------------------- diversos */
+
+QStatusBar {
+    background: @SUPERFICIE@; border-top: 1px solid @LINHA@;
+    color: @CINZA@; font-size: @ROTULO@;
+}
+QStatusBar::item { border: none; }
+
+QProgressBar {
+    background: @FUNDO@; border: 2px solid @TINTA@; border-radius: 0;
+    text-align: center; min-height: 22px; font-weight: 700;
+}
+QProgressBar::chunk { background: @VERMELHO@; }
+
+QToolTip {
+    background: @TINTA@; color: @SUPERFICIE@; border: none;
+    padding: 7px 10px; font-size: @ROTULO@;
+}
+
+QScrollBar:vertical   { width: 12px; background: transparent; margin: 0; }
+QScrollBar:horizontal { height: 12px; background: transparent; margin: 0; }
+QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
+    background: @LINHA@; border-radius: 0; min-height: 34px; min-width: 34px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:horizontal:hover {
+    background: @CINZA@;
+}
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QCheckBox { spacing: 10px; }
+QCheckBox::indicator {
+    width: 20px; height: 20px; border: 2px solid @TINTA@;
+    background: @SUPERFICIE@; border-radius: 0;
+}
+QCheckBox::indicator:checked {
+    background: @VERMELHO@; border-color: @VERMELHO@; image: url(@SELECIONADO@);
+}
+QCheckBox::indicator:disabled { border-color: @LINHA@; background: @FUNDO@; }
 
 /* Rodapé fixo do diálogo de produto: separado do conteúdo que rola */
 QFrame#rodape {
-    background: #ececf0;
-    border-top: 1px solid #d9d9e0;
+    background: @SUPERFICIE@;
+    border: none;
+    border-top: 2px solid @TINTA@;
 }
 
 /* Controles DENTRO de tabelas: o padding grande do formulário não cabe na linha */
-QTableWidget QPushButton { min-height: 30px; padding: 4px 12px; }
-QTableWidget QSpinBox    { min-height: 26px; padding: 4px 6px; }
+QTableWidget QPushButton { min-height: 30px; padding: 3px 12px; border-width: 2px; }
+QTableWidget QSpinBox    { min-height: 26px; padding: 3px 6px; }
 
 /* Sem isto as setinhas do seletor numérico saem cortadas */
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
-    width: 20px; background: #f0f0f4; border-left: 1px solid #d9d9e0;
+    width: 22px; background: @FUNDO@; border-left: 2px solid @LINHA@;
 }
 QSpinBox::up-button, QDoubleSpinBox::up-button { subcontrol-position: top right; }
 QSpinBox::down-button, QDoubleSpinBox::down-button { subcontrol-position: bottom right; }
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
-    image: none; border-left: 4px solid transparent; border-right: 4px solid transparent;
-    border-bottom: 5px solid #55555c; width: 0; height: 0;
+    image: url(@SETA_CIMA@); width: 9px; height: 6px;
 }
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
-    image: none; border-left: 4px solid transparent; border-right: 4px solid transparent;
-    border-top: 5px solid #55555c; width: 0; height: 0;
+    image: url(@SETA_BAIXO@); width: 9px; height: 6px;
 }

@@ -1,14 +1,21 @@
-"""Janela principal — ESCOPO.md §6.
+"""Janela principal — ESCOPO.md §6 e manual da marca §05.
 
-Tela inicial com quatro botões grandes e uma faixa de alertas que diz, em uma
+Tela inicial com os botões grandes e uma faixa de alertas que diz, em uma
 frase, o que precisa de atenção hoje.
+
+O que a marca acrescentou: a barra de título fixa no topo (símbolo + wordmark
+à esquerda, navegação em rótulos caixa alta à direita), que substituiu o botão
+"← Voltar" que cada tela carregava. Com a navegação sempre visível, sair de uma
+tela deixou de depender de achar um botão dentro dela.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -22,6 +29,7 @@ from PySide6.QtWidgets import (
 from ..core import kits, ledger, repo
 from ..services import backup, financeiro, importacao
 from ..version import APP_NAME, __version__
+from . import marca
 from .atualizacao import DialogoAtualizacao, VerificadorDeVersao
 from .dialogos import (
     DialogoAjuste,
@@ -35,16 +43,68 @@ from .tela_estoque import TelaEstoque
 from .tela_importacao import TelaImportacao, escolher_arquivo
 from .tela_kits import TelaKitsPendentes
 from .widgets.comuns import (
+    Lockup,
     avisar,
     botao_cartao,
+    botao_nav,
     confirmar,
     dica,
     faixa,
     informar,
+    marcar_ativo,
     moeda,
-    subtitulo,
-    titulo,
+    numero_grande,
+    regua,
+    rotulo,
 )
+
+# Índices da pilha de telas. Nomeados porque a barra de navegação e os métodos
+# de abrir/voltar precisam falar da mesma tela sem número solto no meio do código.
+INICIO, ESTOQUE, KITS, BALANCO = range(4)
+
+
+class BarraDeTitulo(QFrame):
+    """Barra fixa do topo — manual §05.
+
+    Símbolo a 22 px + wordmark à esquerda; navegação em rótulos caixa alta à
+    direita, com régua vermelha de 2px embaixo do item atual.
+    """
+
+    def __init__(self, janela: JanelaPrincipal):
+        super().__init__(janela)
+        self.setObjectName("barraTitulo")
+        self.setFixedHeight(64)
+
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(30, 0, 30, 0)
+        lay.setSpacing(0)
+
+        self.lockup = Lockup(22)
+        self.lockup.setCursor(Qt.PointingHandCursor)
+        self.lockup.setToolTip("Voltar para o início")
+        self.lockup.clicado.connect(janela.voltar_inicio)
+        lay.addWidget(self.lockup)
+        lay.addStretch(1)
+
+        self.itens: dict[int, QPushButton] = {}
+        for indice, texto, acao in (
+            (INICIO, "Início", janela.voltar_inicio),
+            (ESTOQUE, "Estoque", janela.abrir_estoque),
+            (KITS, "Kits", janela.abrir_kits),
+            (BALANCO, "Balanço", janela.abrir_balanco),
+        ):
+            b = botao_nav(texto, ativo=indice == INICIO)
+            b.clicked.connect(acao)
+            lay.addWidget(b)
+            self.itens[indice] = b
+
+    def marcar(self, indice: int) -> None:
+        for i, botao in self.itens.items():
+            marcar_ativo(botao, i == indice)
+
+    def mostrar_kits(self, visivel: bool) -> None:
+        """A aba de kits só existe enquanto houver kit pendente."""
+        self.itens[KITS].setVisible(visivel)
 
 
 class TelaInicial(QWidget):
@@ -52,11 +112,15 @@ class TelaInicial(QWidget):
         super().__init__(janela)
         self.janela = janela
         self.lay = QVBoxLayout(self)
-        self.lay.setSpacing(16)
-        self.lay.setContentsMargins(30, 24, 30, 24)
+        self.lay.setSpacing(14)
+        self.lay.setContentsMargins(30, 26, 30, 24)
 
-        self.lay.addWidget(titulo(APP_NAME))
-        self.lay.addWidget(subtitulo("Controle de estoque da loja"))
+        cabecalho = QHBoxLayout()
+        cabecalho.addWidget(Lockup(46, assinatura=True))
+        cabecalho.addStretch(1)
+        self.lay.addLayout(cabecalho)
+        self.lay.addWidget(regua())
+        self.lay.addSpacing(4)
 
         # Aviso discreto e não bloqueante, no topo — nunca popup (§10.2)
         self.barra_atualizacao = QWidget()
@@ -74,11 +138,10 @@ class TelaInicial(QWidget):
         self.faixa_alerta = faixa("")
         self.lay.addWidget(self.faixa_alerta)
 
-        self.lb_mes = dica("")
-        self.lay.addWidget(self.lb_mes)
+        self.lay.addWidget(self._bloco_do_mes())
 
         grade = QGridLayout()
-        grade.setSpacing(16)
+        grade.setSpacing(14)
         botoes = [
             ("Ver estoque", "o que tem e o que está acabando", janela.abrir_estoque),
             ("Importar vendas", "baixar o relatório do Mercado Livre", janela.importar_vendas),
@@ -90,31 +153,72 @@ class TelaInicial(QWidget):
         for i, (texto, desc, acao) in enumerate(botoes):
             b = botao_cartao(texto, desc)
             b.clicked.connect(acao)
-            grade.addWidget(b, i // 2, i % 2)
+            grade.addWidget(b, i // 3, i % 3)
+        for coluna in range(3):
+            grade.setColumnStretch(coluna, 1)
         self.lay.addLayout(grade)
 
         self.bt_kits = QPushButton("Configurar kits que faltam")
         self.bt_kits.clicked.connect(janela.abrir_kits)
-        self.lay.addWidget(self.bt_kits)
+        rodape_kits = QHBoxLayout()
+        rodape_kits.addWidget(self.bt_kits)
+        rodape_kits.addStretch(1)
+        self.lay.addLayout(rodape_kits)
 
         self.lay.addStretch(1)
+        self.lay.addWidget(regua(clara=True))
         self.lay.addWidget(dica(f"Versão {__version__}"))
         self.recarregar()
+
+    def _bloco_do_mes(self) -> QFrame:
+        """O resultado do mês como "Número" do manual §04: 34, peso 700, tabular.
+
+        É o dado que ela abre o app para ver. Antes era uma linha de texto
+        pequeno no meio da tela, do mesmo tamanho de tudo o que estava em volta.
+        """
+        bloco = QFrame()
+        bloco.setObjectName("cartaoInfo")
+        lay = QVBoxLayout(bloco)
+        lay.setContentsMargins(20, 16, 20, 18)
+        lay.setSpacing(4)
+
+        self.lb_rotulo_mes = rotulo("Resultado deste mês")
+        lay.addWidget(self.lb_rotulo_mes)
+
+        self.lb_valor_mes = numero_grande("—")
+        lay.addWidget(self.lb_valor_mes)
+
+        self.lb_mes = dica("")
+        lay.addWidget(self.lb_mes)
+
+        self.bloco_mes = bloco
+        return bloco
 
     def _mostrar_mes(self, session) -> None:
         """Uma linha com o resultado do mês. Nunca bloqueia a tela se falhar."""
         try:
             b = financeiro.resumo_do_mes(session)
         except Exception:  # noqa: BLE001
+            self.bloco_mes.setVisible(False)
             self.lb_mes.setText("")
             return
         if not b.tem_dados:
+            self.bloco_mes.setVisible(False)
             self.lb_mes.setText("")
             return
-        verbo = "sobraram" if b.lucro >= 0 else "faltaram"
+
+        self.bloco_mes.setVisible(True)
+        negativo = b.lucro < 0
+        self.lb_valor_mes.setText(moeda(b.lucro))
+        # a cor sai do objectName, e o QSS precisa ser reaplicado para pegar
+        self.lb_valor_mes.setObjectName("numeroNegativo" if negativo else "numero")
+        self.lb_valor_mes.style().unpolish(self.lb_valor_mes)
+        self.lb_valor_mes.style().polish(self.lb_valor_mes)
+
+        verbo = "sobraram" if not negativo else "faltaram"
         self.lb_mes.setText(
-            f"Este mês: {b.vendas} venda(s) e {verbo} {moeda(abs(b.lucro))} "
-            f"(margem {b.margem:.0f}%). Veja em Balanço."
+            f"{b.vendas} venda(s) neste mês e {verbo} {moeda(abs(b.lucro))} "
+            f"— margem de {b.margem:.0f}%. Veja em Balanço."
         )
 
     def mostrar_atualizacao(self, atualizacao) -> None:
@@ -155,8 +259,6 @@ class TelaInicial(QWidget):
         self.bt_kits.setVisible(bool(pendentes))
         if pendentes:
             self.bt_kits.setText(f"Configurar os {len(pendentes)} kits que faltam")
-
-
 class JanelaPrincipal(QMainWindow):
     def __init__(self, session, verificar_atualizacao: bool = True):
         super().__init__()
@@ -165,18 +267,28 @@ class JanelaPrincipal(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.resize(1080, 720)
 
-        self.pilha = QStackedWidget()
-        self.setCentralWidget(self.pilha)
+        self.setWindowIcon(marca.icone_do_app())
 
+        self.pilha = QStackedWidget()
         self.inicial = TelaInicial(self)
         self.estoque = TelaEstoque(session)
         self.kits_pendentes = TelaKitsPendentes(session)
         self.balanco = TelaBalanco(session)
 
-        for tela in (self.inicial, self._com_voltar(self.estoque),
-                     self._com_voltar(self.kits_pendentes),
-                     self._com_voltar(self.balanco)):
+        for tela in (self.inicial, self._com_margem(self.estoque),
+                     self._com_margem(self.kits_pendentes),
+                     self._com_margem(self.balanco)):
             self.pilha.addWidget(tela)
+
+        # A barra vem antes da pilha e nunca sai da tela: é o chrome do app.
+        self.barra = BarraDeTitulo(self)
+        corpo = QWidget()
+        lay_corpo = QVBoxLayout(corpo)
+        lay_corpo.setContentsMargins(0, 0, 0, 0)
+        lay_corpo.setSpacing(0)
+        lay_corpo.addWidget(self.barra)
+        lay_corpo.addWidget(self.pilha, 1)
+        self.setCentralWidget(corpo)
 
         self._menu()
         self.statusBar().showMessage("Pronto")
@@ -186,16 +298,11 @@ class JanelaPrincipal(QMainWindow):
         if verificar_atualizacao:
             self._verificar_atualizacao()
 
-    def _com_voltar(self, conteudo: QWidget) -> QWidget:
+    def _com_margem(self, conteudo: QWidget) -> QWidget:
+        """Só o respiro da página: quem navega agora é a barra de título."""
         w = QWidget()
         lay = QVBoxLayout(w)
-        lay.setContentsMargins(20, 16, 20, 16)
-        topo = QHBoxLayout()
-        bt = QPushButton("← Voltar")
-        bt.clicked.connect(self.voltar_inicio)
-        topo.addWidget(bt)
-        topo.addStretch(1)
-        lay.addLayout(topo)
+        lay.setContentsMargins(30, 22, 30, 22)
         lay.addWidget(conteudo, 1)
         return w
 
@@ -227,21 +334,26 @@ class JanelaPrincipal(QMainWindow):
 
     # ------------------------------------------------------------ navegação
 
+    def _ir_para(self, indice: int) -> None:
+        self.pilha.setCurrentIndex(indice)
+        self.barra.marcar(indice)
+
     def voltar_inicio(self):
         self.inicial.recarregar()
-        self.pilha.setCurrentIndex(0)
+        self.barra.mostrar_kits(self.inicial.bt_kits.isVisible())
+        self._ir_para(INICIO)
 
     def abrir_estoque(self):
         self.estoque.recarregar()
-        self.pilha.setCurrentIndex(1)
+        self._ir_para(ESTOQUE)
 
     def abrir_kits(self):
         self.kits_pendentes.recarregar()
-        self.pilha.setCurrentIndex(2)
+        self._ir_para(KITS)
 
     def abrir_balanco(self):
         self.balanco.recarregar()
-        self.pilha.setCurrentIndex(3)
+        self._ir_para(BALANCO)
 
     # --------------------------------------------------------------- ações
 

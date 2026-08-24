@@ -42,6 +42,7 @@ from .widgets.comuns import (
     dica,
     faixa,
     informar,
+    regua,
     secao,
     titulo,
 )
@@ -78,6 +79,7 @@ class EditorComposicao(QWidget):
         # a linha precisa caber um seletor e um botão: 44px é o mínimo (§6)
         self.tabela.verticalHeader().setDefaultSectionSize(ALTURA_LINHA)
         cab = self.tabela.horizontalHeader()
+        cab.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)   # manual §04
         cab.setSectionResizeMode(0, QHeaderView.Stretch)
         for coluna, largura in ((1, 110), (2, 120), (3, 130)):
             cab.setSectionResizeMode(coluna, QHeaderView.Fixed)
@@ -296,10 +298,11 @@ class TelaProduto(QDialog):
         lay.setContentsMargins(24, 20, 24, 20)
         lay.setSpacing(12)
         lay.addWidget(titulo("Novo produto" if self.novo else produto.rotulo))
+        lay.addWidget(regua())
 
         form = QFormLayout()
         form.setSpacing(10)
-        form.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        form.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.f_sku = QLineEdit(produto.sku if produto else "")
         self.f_nome = QLineEdit(produto.nome if produto else "")
@@ -343,7 +346,7 @@ class TelaProduto(QDialog):
         self.area_opcionais = QWidget()
         opc = QFormLayout(self.area_opcionais)
         opc.setContentsMargins(0, 0, 0, 0)
-        opc.setLabelAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        opc.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         opc.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         opc.addRow("Onde fica", self.f_local)
         opc.addRow("Observações", self.f_obs)
