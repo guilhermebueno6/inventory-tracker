@@ -218,3 +218,49 @@ def test_produto_apagado_nao_deixa_orfao_no_banco(session, catalogo):
     session.commit()
 
     assert session.get(Produto, pid) is None
+
+
+def test_venda_cancelada_conta_como_historico(session, catalogo):
+    """Regressão: `venda_item` também aponta para `produto`.
+
+    Uma venda CANCELADA grava a linha de dinheiro e nenhum movimento de estoque
+    (`abateu_estoque=False`). Contando só `movimento`, o produto passava por
+    `pode_excluir` e o DELETE morria na chave estrangeira — IntegrityError na
+    cara da usuária, sem explicação e sem saída.
+    """
+    from estoque_facil.core.models import VendaItem
+
+    alvo = repo.criar_produto(session, "so.cancelada", "Só vendeu e cancelou")
+    session.add(
+        VendaItem(numero_venda="9001", sku_ref="so.cancelada", produto_id=alvo.id,
+                  cancelada=True, abateu_estoque=False, total_liquido=0.0)
+    )
+    session.commit()
+
+    analise = exclusao.analisar(session, alvo)
+    assert analise.movimentos == 0, "cancelada não mexe no estoque"
+    assert analise.vendas == 1 and analise.registros == 1
+    assert analise.pode_excluir is False
+
+    with pytest.raises(ErroExclusao, match="histórico"):
+        exclusao.excluir(session, alvo)
+
+    # o caminho que sobra precisa funcionar
+    exclusao.arquivar(session, alvo)
+    session.commit()
+    assert alvo.ativo is False
+
+
+def test_produto_vendido_de_verdade_conta_as_duas_historias(session, com_estoque):
+    """Movimento e venda_item contam juntos, sem dupla contagem virar mentira."""
+    from estoque_facil.core.models import VendaItem
+
+    alvo = com_estoque["manta.rosa"]
+    session.add(
+        VendaItem(numero_venda="9002", sku_ref="manta.rosa", produto_id=alvo.id)
+    )
+    session.commit()
+
+    analise = exclusao.analisar(session, alvo)
+    assert (analise.movimentos, analise.vendas) == (1, 1)
+    assert "2 registros" in analise.resumo

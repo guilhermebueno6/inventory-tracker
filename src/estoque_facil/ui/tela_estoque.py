@@ -236,6 +236,8 @@ class TelaEstoque(QWidget):
         if p is None or p.ativo:
             return
         if reativar_produto(self, self.session, p):
+            self.recarregar()
+
     def ajustar_estoque(self):
         """Já abre no produto selecionado, se houver um."""
         from .dialogos import DialogoAjuste

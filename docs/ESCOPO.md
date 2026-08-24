@@ -464,8 +464,15 @@ diferença: ela clica em *Excluir* e o app pergunta uma coisa só):
 **Por que não apagar sempre.** O §4.1 diz que estoque é a soma dos movimentos. Apagar um
 produto com histórico deixaria vendas antigas sem o item que saiu — o número pararia de
 bater com a realidade e o *Conferir estoque* passaria a acusar diferença para sempre.
-Nas chaves estrangeiras do banco isso é literal: `movimento.produto_id` não tem cascata,
-então o SQLite recusaria. O app recusa antes, em português.
+Nas chaves estrangeiras do banco isso é literal: nem `movimento.produto_id` nem
+`venda_item.produto_id` têm cascata, então o SQLite recusaria. O app recusa antes, em
+português.
+
+**"Histórico" são as duas tabelas.** `movimento` (quantidade) e `venda_item` (dinheiro,
+§4.4) contam juntos. Não é detalhe: uma venda **cancelada** grava a linha de dinheiro e
+**nenhum** movimento de estoque. Olhar só para `movimento` deixaria esse produto passar
+como "nunca movimentado" e o `DELETE` morreria na chave estrangeira — erro técnico na
+cara da usuária, sem explicação e sem saída.
 
 **Componente usado em kit não sai** — nem excluído, nem arquivado. A mensagem nomeia os
 kits que quebrariam e manda removê-lo dessas composições primeiro (é a regra do §5.2.5

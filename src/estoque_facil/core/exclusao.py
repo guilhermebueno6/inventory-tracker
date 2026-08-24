@@ -23,7 +23,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from .kits import componentes_de, kits_afetados
-from .models import Composicao, Movimento, Produto, Saldo, VinculoML
+from .models import Composicao, Movimento, Produto, Saldo, VendaItem, VinculoML
 
 
 class ErroExclusao(Exception):
@@ -36,9 +36,21 @@ class Analise:
 
     produto: Produto
     movimentos: int = 0
+    vendas: int = 0
     saldo: int = 0
     kits_que_usam: list[Produto] = field(default_factory=list)
     componentes: int = 0
+
+    @property
+    def registros(self) -> int:
+        """Histórico total: baixas de estoque + linhas de dinheiro.
+
+        São duas tabelas por motivos diferentes (§4.4), mas para quem usa é uma
+        coisa só — "este produto já teve movimento". E `venda_item` guarda linha
+        de venda CANCELADA, que não gera movimento nenhum: contar só `movimento`
+        deixaria passar um produto que o banco recusa apagar.
+        """
+        return self.movimentos + self.vendas
 
     @property
     def bloqueado(self) -> bool:
@@ -48,7 +60,7 @@ class Analise:
     @property
     def pode_excluir(self) -> bool:
         """Apagar de vez só quando não há histórico nem kit dependendo dele."""
-        return not self.bloqueado and self.movimentos == 0
+        return not self.bloqueado and self.registros == 0
 
     @property
     def motivo_bloqueio(self) -> str:
@@ -89,8 +101,8 @@ class Analise:
             return texto
 
         texto = (
-            f"{self.produto.rotulo} tem {self.movimentos} "
-            f"{'registro' if self.movimentos == 1 else 'registros'} no histórico, "
+            f"{self.produto.rotulo} tem {self.registros} "
+            f"{'registro' if self.registros == 1 else 'registros'} no histórico, "
             "e histórico não se apaga.\n\n"
             "Vou arquivar: ele some das listas e das buscas, mas as vendas "
             "antigas continuam certas. Dá para trazer de volta depois."
@@ -115,6 +127,14 @@ def analisar(session: Session, produto: Produto) -> Analise:
         )
         or 0
     )
+    vendas = int(
+        session.scalar(
+            select(func.count())
+            .select_from(VendaItem)
+            .where(VendaItem.produto_id == produto.id)
+        )
+        or 0
+    )
     saldo = 0
     if not produto.eh_kit:
         from .ledger import saldo_de
@@ -124,6 +144,7 @@ def analisar(session: Session, produto: Produto) -> Analise:
     return Analise(
         produto=produto,
         movimentos=movimentos,
+        vendas=vendas,
         saldo=saldo,
         kits_que_usam=kits_afetados(session, produto),
         componentes=len(componentes_de(session, produto)) if produto.eh_kit else 0,
@@ -140,9 +161,9 @@ def excluir(session: Session, produto: Produto) -> str:
     a = analisar(session, produto)
     if a.bloqueado:
         raise ErroExclusao(a.motivo_bloqueio)
-    if a.movimentos:
+    if a.registros:
         raise ErroExclusao(
-            f"{produto.rotulo} tem {a.movimentos} movimentos no histórico e não "
+            f"{produto.rotulo} tem {a.registros} registros no histórico e não "
             "pode ser apagado. Arquive-o: ele some das listas e o histórico fica."
         )
 

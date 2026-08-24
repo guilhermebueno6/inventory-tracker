@@ -1,4 +1,5 @@
-"""Diálogos curtos: entrada de mercadoria, ajuste de estoque, despesas e desfazer, desfazer importação e excluir produto."""
+"""Diálogos curtos: entrada de mercadoria, ajuste de estoque, despesas,
+desfazer importação e excluir produto."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -22,7 +23,6 @@ from PySide6.QtWidgets import (
 from sqlalchemy import select
 
 from ..core import exclusao, kits, ledger, repo
-
 from ..core.models import (
     ROTULOS_DESPESA,
     CategoriaDespesa,
