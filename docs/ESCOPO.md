@@ -652,7 +652,7 @@ inventory-tracker/
 │   │   ├── widgets/
 │   │   └── style.qss           # gerado a partir de marca.py (tokens @NOME@)
 │   └── resources/
-│       ├── fontes/             # Archivo variável (OFL) + licença
+│       ├── fontes/             # Archivo 400/600/700 (OFL) + licença
 │       ├── marca/              # símbolo, lockups, ícones, setas do QSS
 │       ├── icone.ico           # instalador e executável Windows
 │       └── icone.icns          # bundle do macOS

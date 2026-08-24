@@ -28,9 +28,9 @@ O `style.qss` usa tokens `@NOME@`, trocados por `marca.folha_de_estilo()`.
   nome se a fonte não registrasse.
 - **§03 Cor.** A paleta inteira está em `marca.py`. Texto pequeno em vermelho
   usa `VERMELHO_ESCURO` (`#B32309`), como manda o manual.
-- **§04 Tipografia.** Archivo variável empacotado em `resources/fontes/`. Um
-  arquivo só entrega os pesos 400/600/700. Números de tabela passam por
-  `comuns.celula_numero()`, que liga `tnum`.
+- **§04 Tipografia.** Archivo empacotado em `resources/fontes/`, em três
+  arquivos estáticos — 400, 600 e 700, exatamente os pesos que o manual usa.
+  Números de tabela passam por `comuns.celula_numero()`, que liga `tnum`.
 - **§05 Aplicação.** `main_window.BarraDeTitulo` — símbolo a 22 px + wordmark à
   esquerda, navegação em rótulos caixa alta à direita, régua vermelha embaixo do
   item atual. O ícone do app é quadrado cheio, sem borda e sem sombra.
@@ -58,6 +58,28 @@ digital e não enxerga bem de perto. Onde os dois documentos se cruzam, §6 ganh
 4. **Vermelho no foco.** O manual reserva o vermelho para ação primária e
    "pequenas ênfases". O anel de foco entra nessa segunda categoria: é pequeno,
    é transitório e é o que diz onde o teclado está.
+
+## Por que três arquivos e não a fonte variável
+
+A variável do Google Fonts parecia a escolha óbvia — um arquivo, todos os
+pesos — e funcionou no macOS. No Linux não: o eixo `wght` dela tem **600** como
+padrão e o `nameID 1` é `"Archivo SemiBold"`. O Qt sobre fontconfig lê esse
+nome, então 400, 500 e 600 saíam todos do mesmo desenho e o 700 virava negrito
+sintético em vez do Bold desenhado. A hierarquia do §04 desmoronava, e só na
+plataforma em que ninguém estava olhando.
+
+`packaging/fontes/gerar_estaticas.py` refaz os três estáticos a partir da
+variável, com `fontTools.varLib.instancer`. Rode só quando a fonte for
+atualizada — o resultado é versionado.
+
+O teste que pega isso é `test_os_pesos_do_manual_desenham_diferente`: ele
+**mede a tinta na tela** em cada peso, em vez de perguntar ao Qt qual peso ele
+acha que aplicou. Perguntar não serve — o Qt devolve o peso que você pediu
+mesmo quando caiu num desenho que não existe.
+
+Detalhe de plataforma: o caminho passado a `addApplicationFont` precisa ser
+absoluto. O CoreText recusa caminho relativo dependendo de onde o processo foi
+aberto — silenciosamente, devolvendo `-1`.
 
 ## Conferir na tela
 

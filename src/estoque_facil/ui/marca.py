@@ -66,25 +66,40 @@ _familia_carregada: str | None = None
 
 
 def carregar_fontes() -> str:
-    """Registra o Archivo empacotado e devolve a família a usar.
+    """Registra os pesos do Archivo empacotados e devolve a família a usar.
 
-    É um arquivo variável só: o Qt expõe dele os nove pesos nomeados, então
-    400/600/700 do manual saem todos do mesmo TTF. Se o registro falhar, o
-    app não quebra — cai na pilha de grotescas do sistema.
+    São três arquivos estáticos — 400, 600 e 700, os pesos do manual §04 — e
+    não a fonte variável do Google Fonts. A variável funcionava no macOS e
+    falhava no Linux: o eixo `wght` dela tem 600 como padrão, o nameID 1 é
+    "Archivo SemiBold", e o Qt sobre fontconfig lê justamente esse nome. O
+    resultado era 400, 500 e 600 saindo idênticos (todos no padrão) e o 700
+    virando negrito sintético em vez do Bold desenhado.
+
+    `packaging/fontes/gerar_estaticas.py` refaz os três a partir da variável.
+
+    O caminho precisa ser absoluto: o CoreText recusa o relativo dependendo de
+    onde o processo foi aberto. `RECURSOS` já vem de `__file__.resolve()`.
+
+    Se nada registrar, o app não quebra — cai na pilha de grotescas do sistema.
     """
     global _familia_carregada
     if _familia_carregada is not None:
         return _familia_carregada
 
-    familia = ""
-    arquivo = RECURSOS / "fontes" / "Archivo-Variable.ttf"
-    if arquivo.exists():
+    familias: list[str] = []
+    for arquivo in sorted((RECURSOS / "fontes").glob("*.ttf")):
         ident = QFontDatabase.addApplicationFont(str(arquivo))
-        familias = QFontDatabase.applicationFontFamilies(ident) if ident != -1 else []
-        if familias:
-            familia = familias[0]
+        if ident != -1:
+            familias += QFontDatabase.applicationFontFamilies(ident)
 
-    _familia_carregada = familia or FAMILIA_PADRAO
+    # O SemiBold registra duas famílias: "Archivo" (a tipográfica, nameID 16) e
+    # "Archivo SemiBold" (a legada, nameID 1 — a convenção OpenType só deixa
+    # Regular/Bold/Italic morarem na mesma família legada). Quem interessa é a
+    # tipográfica, que é a que casa com os três pesos.
+    _familia_carregada = (
+        FAMILIA_PADRAO if FAMILIA_PADRAO in familias
+        else (familias[0] if familias else FAMILIA_PADRAO)
+    )
     return _familia_carregada
 
 

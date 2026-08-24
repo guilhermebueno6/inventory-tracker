@@ -31,20 +31,51 @@ def app():
 
 def test_a_fonte_archivo_esta_empacotada_e_registra(app):
     """Se cair no fallback, o app abre com a letra do sistema — não é a marca."""
-    assert (marca.RECURSOS / "fontes" / "Archivo-Variable.ttf").exists()
+    fontes = marca.RECURSOS / "fontes"
+    for peso in ("Regular", "SemiBold", "Bold"):
+        assert (fontes / f"Archivo-{peso}.ttf").exists(), f"falta o peso {peso}"
     assert marca.familia() == "Archivo"
 
 
-def test_os_quatro_pesos_do_manual_existem_de_verdade(app):
-    """400/600/700 precisam desenhar diferente, não só pedir peso diferente.
+def _tinta(fonte) -> int:
+    """Quanto preto a fonte põe na tela ao escrever a mesma frase.
 
-    O arquivo é uma fonte variável: se o Qt não expuser as instâncias nomeadas,
-    os três pesos saem idênticos e a hierarquia tipográfica do §04 some.
+    Medir o desenho é o único jeito honesto de testar peso: pedir 700 e receber
+    700 de volta não prova nada — o Qt devolve o que foi pedido mesmo quando
+    caiu num peso que não existe.
     """
-    from PySide6.QtGui import QFontDatabase
+    from PySide6.QtGui import QImage, QPainter
 
-    marca.carregar_fontes()
-    assert {"Regular", "SemiBold", "Bold"} <= set(QFontDatabase.styles("Archivo"))
+    imagem = QImage(520, 70, QImage.Format_Grayscale8)
+    imagem.fill(255)
+    pintor = QPainter(imagem)
+    pintor.setFont(fonte)
+    pintor.drawText(10, 48, "Estoque Facil 123")
+    pintor.end()
+    return sum(
+        255 - imagem.pixelColor(x, y).red()
+        for y in range(imagem.height())
+        for x in range(imagem.width())
+    )
+
+
+def test_os_pesos_do_manual_desenham_diferente(app):
+    """400/600/700 precisam DESENHAR diferente, não só pedir peso diferente.
+
+    Foi por não medir isto que a primeira versão passou no macOS e quebrou no
+    Linux: a fonte variável do Google Fonts tem 600 como padrão do eixo `wght`,
+    e sobre fontconfig os três pesos saíam do mesmo desenho. Com os três
+    estáticos empacotados, a tinta tem que crescer a cada degrau.
+    """
+    from PySide6.QtGui import QFontInfo
+
+    fontes = {peso: marca.fonte(20, peso) for peso in (400, 600, 700)}
+    assert all(QFontInfo(f).family() == "Archivo" for f in fontes.values()), (
+        "algum peso caiu na fonte do sistema"
+    )
+
+    tinta = {peso: _tinta(f) for peso, f in fontes.items()}
+    assert tinta[400] < tinta[600] < tinta[700], tinta
 
 
 def test_numero_de_tabela_usa_algarismo_tabular(app):
