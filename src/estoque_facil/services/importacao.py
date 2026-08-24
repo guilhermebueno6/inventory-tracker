@@ -178,6 +178,13 @@ def analisar_vendas(session: Session, caminho: str | Path) -> AnaliseVendas:
             avisos.append("Saiu do estoque Full — não desconta do estoque de casa.")
         if lv.status_desconhecido:
             avisos.append(f"Status “{lv.estado}” é novo — confira se deve mesmo baixar.")
+        if not produto.ativo:
+            # A baixa acontece do mesmo jeito — a venda é real. Mas sem este aviso
+            # o estoque mexeria num produto que sumiu de todas as telas.
+            avisos.append(
+                f"{produto.rotulo} está arquivado e mesmo assim vendeu. "
+                "Traga-o de volta em Estoque → Arquivados se voltou à ativa."
+            )
         for prod, qtd in baixas:
             atual = disponivel(session, prod).quantidade
             if atual - qtd < 0:

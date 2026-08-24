@@ -103,6 +103,105 @@ def test_editor_recusa_kit_dentro_de_kit(app, loja, session):
     assert outro.id not in editor.itens()
 
 
+# ------------------------------------------------------------------ exclusão
+#
+# `sem_modais` faz `confirmar` devolver True, então estes testes exercitam o
+# caminho de quem clicou em "Excluir de vez" / "Arquivar".
+
+
+def _selecionar(tela, texto):
+    tela.busca.setText(texto)
+    tela.recarregar()
+    assert tela.tabela.rowCount() >= 1, f"nada encontrado para {texto}"
+    tela.tabela.setCurrentCell(0, 0)
+    return tela
+
+
+def test_excluir_pela_lista_tira_o_produto_do_catalogo(app, loja, session):
+    from estoque_facil.ui.tela_estoque import TelaEstoque
+
+    repo.criar_produto(session, "zz.descartavel", "Item que ela não vende mais")
+    session.commit()
+
+    tela = _selecionar(TelaEstoque(session), "zz.descartavel")
+    tela.excluir_selecionado()
+
+    assert repo.por_sku(session, "zz.descartavel") is None
+    assert tela.tabela.rowCount() == 0
+
+
+def test_excluir_componente_de_kit_e_recusado_na_tela(app, loja, session):
+    """A tela não pode ser um caminho mais frouxo que o núcleo — §5.2.5."""
+    from estoque_facil.ui.tela_estoque import TelaEstoque
+
+    tela = _selecionar(TelaEstoque(session), "mord.mao.rosa")
+    tela.excluir_selecionado()
+
+    assert repo.por_sku(session, "mord.mao.rosa") is not None
+
+
+def test_produto_com_historico_e_arquivado_e_volta_pelo_filtro(app, loja, session):
+    from estoque_facil.core import ledger
+    from estoque_facil.ui.tela_estoque import TelaEstoque
+
+    alvo = repo.criar_produto(session, "zz.usado", "Item com histórico")
+    ledger.entrada_compra(session, alvo, 7)
+    session.commit()
+
+    tela = _selecionar(TelaEstoque(session), "zz.usado")
+    tela.excluir_selecionado()
+
+    assert alvo.ativo is False
+    assert tela.tabela.rowCount() == 0, "arquivado sai da lista normal"
+
+    tela.filtro.setCurrentText("Arquivados")
+    _selecionar(tela, "zz.usado")
+    assert "Arquivado" in tela.tabela.item(0, 4).text()
+
+    tela.reativar_selecionado()
+    assert alvo.ativo is True
+    assert ledger.saldo_de(session, alvo) == 7
+
+
+def test_arquivado_com_historico_nao_pode_ser_apagado_de_vez(app, loja, session):
+    from estoque_facil.core import exclusao, ledger
+    from estoque_facil.ui.tela_estoque import TelaEstoque
+
+    alvo = repo.criar_produto(session, "zz.usado", "Item com histórico")
+    ledger.entrada_compra(session, alvo, 3)
+    exclusao.arquivar(session, alvo)
+    session.commit()
+
+    tela = TelaEstoque(session)
+    tela.filtro.setCurrentText("Arquivados")
+    _selecionar(tela, "zz.usado")
+    tela.excluir_selecionado()
+
+    assert repo.por_sku(session, "zz.usado") is not None
+
+
+def test_kits_pendentes_pode_excluir_o_kit_que_ela_nao_vende_mais(app, loja, session):
+    from estoque_facil.ui.tela_kits import TelaKitsPendentes
+
+    tela = TelaKitsPendentes(session)
+    antes = tela.tabela.rowCount()
+    sku = tela.tabela.item(0, 0).text()
+    tela.tabela.setCurrentCell(0, 0)
+
+    tela.excluir()
+
+    assert repo.por_sku(session, sku) is None
+    assert tela.tabela.rowCount() == antes - 1
+
+
+def test_tela_do_produto_so_oferece_excluir_ao_editar(app, loja, session):
+    from estoque_facil.ui.tela_produto import TelaProduto
+
+    assert not hasattr(TelaProduto(session, None), "bt_excluir")
+    assert hasattr(TelaProduto(session, repo.por_sku(session, "mord.mao.rosa")),
+                   "bt_excluir")
+
+
 def test_tela_de_importacao_classifica_as_linhas(app, loja, session, monkeypatch):
     from estoque_facil.services.importacao import Situacao
     from estoque_facil.ui.tela_importacao import TelaImportacao

@@ -1,4 +1,4 @@
-"""Diálogos curtos: entrada de mercadoria e desfazer importação."""
+"""Diálogos curtos: entrada de mercadoria, desfazer importação e excluir produto."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
@@ -17,8 +17,8 @@ from PySide6.QtWidgets import (
 )
 from sqlalchemy import select
 
-from ..core import kits, ledger, repo
-from ..core.models import LoteImportacao, StatusLote, TipoProduto
+from ..core import exclusao, kits, ledger, repo
+from ..core.models import LoteImportacao, Produto, StatusLote, TipoProduto
 from .widgets.comuns import (
     avisar,
     celula,
@@ -84,8 +84,6 @@ class DialogoEntrada(QDialog):
         if pid is None:
             avisar(self, "Escolha o produto", "Preciso saber o que chegou.")
             return
-        from ..core.models import Produto
-
         produto = self.session.get(Produto, pid)
         antes = {k.id: kits.disponivel(self.session, k).quantidade
                  for k in kits.kits_afetados(self.session, produto)}
@@ -109,9 +107,7 @@ class DialogoEntrada(QDialog):
 
         ganho = []
         for kit_id, valor in antes.items():
-            from ..core.models import Produto as P
-
-            kit = self.session.get(P, kit_id)
+            kit = self.session.get(Produto, kit_id)
             agora = kits.disponivel(self.session, kit).quantidade
             if agora > valor:
                 ganho.append(f"{kit.rotulo}: {valor} → {agora}")
@@ -202,3 +198,82 @@ class DialogoImportacoes(QDialog):
             return
         informar(self, "Desfeito", f"{qtd} movimentos removidos. O estoque foi restaurado.")
         self.recarregar()
+
+
+# --------------------------------------------------------------- excluir produto
+#
+# Fica aqui, e não em cada tela, porque as três (estoque, produto e kits
+# pendentes) precisam do MESMO fluxo — e um item excluído por um caminho mais
+# frouxo que o outro seria justamente o bug que o §5.2.5 evita.
+
+
+def excluir_produto(pai, session, produto) -> bool:
+    """Exclui ou arquiva um produto, perguntando UMA coisa só (§6).
+
+    Quem decide entre apagar e arquivar é `core.exclusao` — a tela só mostra a
+    frase e o botão certo. Devolve True quando o produto saiu do catálogo.
+    """
+    analise = exclusao.analisar(session, produto)
+    rotulo = produto.rotulo
+
+    if analise.bloqueado:
+        avisar(pai, "Este item faz parte de kits", analise.motivo_bloqueio)
+        return False
+
+    # Já arquivado e com histórico: arquivar de novo não faria nada, e apagar
+    # levaria junto o item de vendas antigas. Dizer isso é melhor que um
+    # botão que parece funcionar e não muda nada.
+    if not analise.pode_excluir and not produto.ativo:
+        avisar(
+            pai,
+            "Este produto não pode ser apagado",
+            f"{rotulo} já está arquivado, e tem {analise.movimentos} "
+            f"{'registro' if analise.movimentos == 1 else 'registros'} no "
+            "histórico de vendas e entradas.\n\n"
+            "Apagar de vez deixaria essas vendas antigas sem o item que saiu. "
+            "Arquivado ele já não atrapalha: não aparece em listas, buscas nem "
+            "alertas.",
+        )
+        return False
+
+    if analise.pode_excluir:
+        if not confirmar(pai, f"Excluir {rotulo}", analise.resumo, "Excluir de vez"):
+            return False
+        acao, feito = exclusao.excluir, "excluído de vez"
+    else:
+        if not confirmar(pai, f"Arquivar {rotulo}", analise.resumo, "Arquivar"):
+            return False
+        acao, feito = exclusao.arquivar, "arquivado"
+
+    try:
+        acao(session, produto)
+        session.commit()
+    except exclusao.ErroExclusao as exc:
+        session.rollback()
+        avisar(pai, "Não consegui excluir", str(exc))
+        return False
+    except Exception as exc:  # noqa: BLE001
+        session.rollback()
+        avisar(pai, "Não consegui excluir", "Algo deu errado ao gravar.",
+               detalhe_tecnico=repr(exc))
+        return False
+
+    informar(pai, "Pronto", f"{rotulo} foi {feito}.")
+    return True
+
+
+def reativar_produto(pai, session, produto) -> bool:
+    """Traz um produto arquivado de volta para as listas."""
+    rotulo = produto.rotulo
+    if not confirmar(
+        pai,
+        f"Trazer {rotulo} de volta",
+        f"{rotulo} volta a aparecer nas listas e nas buscas, "
+        "com o estoque e o histórico que já tinha.",
+        "Trazer de volta",
+    ):
+        return False
+    exclusao.reativar(session, produto)
+    session.commit()
+    informar(pai, "Pronto", f"{rotulo} está de volta no catálogo.")
+    return True

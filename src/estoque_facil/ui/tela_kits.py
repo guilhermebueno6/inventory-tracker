@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from ..core import kits, repo
 from ..core.models import Produto, TipoProduto
 from ..services import sugestao
+from .dialogos import excluir_produto
 from .tela_produto import TelaProduto
 from .widgets.comuns import celula, configurar_colunas, dica, faixa, titulo
 
@@ -54,6 +55,12 @@ class TelaKitsPendentes(QWidget):
         self.lay.addWidget(self.tabela, 1)
 
         acoes = QHBoxLayout()
+        # Nem todo kit pendente vale montar: o catálogo do ML traz anúncios que
+        # ela já não vende. Poder excluir aqui é o que faz a lista chegar a zero.
+        bt_excluir = QPushButton("Excluir este kit")
+        bt_excluir.setObjectName("perigo")
+        bt_excluir.clicked.connect(self.excluir)
+        acoes.addWidget(bt_excluir)
         acoes.addStretch(1)
         bt = QPushButton("Montar este kit")
         bt.setObjectName("primario")
@@ -88,12 +95,21 @@ class TelaKitsPendentes(QWidget):
             self.tabela.setItem(i, 3, celula(texto))
             self.tabela.item(i, 0).setData(Qt.UserRole, p.id)
 
-    def abrir(self):
+    def _selecionado(self) -> Produto | None:
         i = self.tabela.currentRow()
         if i < 0:
+            return None
+        return self.session.get(Produto, self.tabela.item(i, 0).data(Qt.UserRole))
+
+    def excluir(self):
+        produto = self._selecionado()
+        if produto is None:
             return
-        pid = self.tabela.item(i, 0).data(Qt.UserRole)
-        produto = self.session.get(Produto, pid)
+        if excluir_produto(self, self.session, produto):
+            self.recarregar()
+
+    def abrir(self):
+        produto = self._selecionado()
         if produto is None:
             return
         if produto.tipo != TipoProduto.KIT:
