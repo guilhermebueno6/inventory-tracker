@@ -9,7 +9,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDateEdit,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -33,6 +32,7 @@ from ..core.models import (
 )
 from ..services import financeiro
 from .widgets.comuns import (
+    CampoDinheiro,
     avisar,
     celula,
     configurar_colunas,
@@ -85,10 +85,7 @@ class DialogoEntrada(QDialog):
         self.qtd = QSpinBox()
         self.qtd.setRange(1, 999999)
         self.qtd.setValue(1)
-        self.custo = QDoubleSpinBox()
-        self.custo.setRange(0, 999999)
-        self.custo.setDecimals(2)
-        self.custo.setPrefix("R$ ")
+        self.custo = CampoDinheiro()
 
         self.fornecedor = QLineEdit()
         self.fornecedor.setPlaceholderText("de quem você comprou (opcional)")
@@ -470,10 +467,7 @@ class DialogoDespesa(QDialog):
         self.categoria = QComboBox()
         for codigo in CategoriaDespesa:
             self.categoria.addItem(ROTULOS_DESPESA[codigo], str(codigo))
-        self.valor = QDoubleSpinBox()
-        self.valor.setRange(0, 9999999)
-        self.valor.setDecimals(2)
-        self.valor.setPrefix("R$ ")
+        self.valor = CampoDinheiro(maximo=9999999)
         self.observacao = QLineEdit()
         self.observacao.setPlaceholderText("nota fiscal, fornecedor… (opcional)")
 

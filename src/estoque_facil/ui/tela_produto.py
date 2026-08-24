@@ -12,7 +12,6 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
-    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -37,6 +36,7 @@ from ..core.models import TipoMovimento, TipoProduto
 from ..services import sugestao
 from .dialogos import excluir_produto
 from .widgets.comuns import (
+    CampoDinheiro,
     avisar,
     confirmar,
     dica,
@@ -306,10 +306,7 @@ class TelaProduto(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         self.f_sku = QLineEdit(produto.sku if produto else "")
         self.f_nome = QLineEdit(produto.nome if produto else "")
-        self.f_custo = QDoubleSpinBox()
-        self.f_custo.setRange(0, 999999)
-        self.f_custo.setDecimals(2)
-        self.f_custo.setPrefix("R$ ")
+        self.f_custo = CampoDinheiro()
         self.f_custo.setValue(produto.custo if produto else 0)
         self.f_minimo = QSpinBox()
         self.f_minimo.setRange(0, 99999)
