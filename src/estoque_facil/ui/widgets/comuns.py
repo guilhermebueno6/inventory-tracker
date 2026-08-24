@@ -1,8 +1,12 @@
 """Peças de interface reaproveitadas — ESCOPO.md §6."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import re
+
+from PySide6.QtCore import QLocale, Qt
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
+    QDoubleSpinBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -23,6 +27,11 @@ VERMELHO = "#b3261e"
 LIMITE_TITULO = 36
 
 
+def digitos_br(valor: float) -> str:
+    """1.234,56 — os números do jeito daqui, sem símbolo e sem sinal."""
+    return f"{abs(valor):,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+
+
 def moeda(valor: float) -> str:
     """R$ 1.234,56 — ponto no milhar, vírgula no centavo, sinal antes do símbolo.
 
@@ -30,13 +39,84 @@ def moeda(valor: float) -> str:
     e trinta e quatro reais e cinquenta e seis... ou não lê.
     """
     sinal = "-" if round(valor, 2) < 0 else ""
-    inteiro = f"{abs(valor):,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
-    return f"{sinal}R$ {inteiro}"
+    return f"{sinal}R$ {digitos_br(valor)}"
 
 
 def numero(valor: float, casas: int = 1) -> str:
     """Número com vírgula decimal — usado nas margens."""
     return f"{valor:.{casas}f}".replace(".", ",")
+
+
+# tudo que pode aparecer num valor digitado: os números, os separadores, o
+# símbolo e o sinal. Qualquer outra tecla é recusada na hora.
+_TECLAS_DE_VALOR = set("R$ .,-0123456789\u00a0")
+
+
+def ler_dinheiro(texto: str) -> float:
+    """Lê um valor do jeito que ela digita, não do jeito que o Qt espera.
+
+    Ela escreve "13,50", mas também "R$ 13.50", "1.234,56", "1234" ou só "13,".
+    Todos querem dizer a mesma coisa e todos precisam funcionar (§6) — recusar
+    a tecla errada não ensina nada a quem não sabe qual é a certa.
+
+    A regra do separador: quando aparecem os dois, o último manda (em
+    "1.234,56" a vírgula é o centavo; em "1,234.56", o ponto). Sozinho, o
+    ponto é milhar se separar um grupo redondo de três dígitos — "1.234" são
+    mil duzentos e trinta e quatro, como aparece escrito na tela inteira —
+    e é centavo em qualquer outro caso, que é o "13.50" do teclado numérico.
+    """
+    limpo = re.sub(r"[^0-9,.-]", "", texto)
+    negativo = limpo.startswith("-")
+    limpo = limpo.replace("-", "")
+    if not limpo:
+        return 0.0
+
+    corte = max(limpo.rfind(","), limpo.rfind("."))
+    if corte >= 0 and limpo[corte] == "." and "," not in limpo:
+        milhar = limpo.count(".") > 1 or len(limpo) - corte - 1 == 3
+        corte = -1 if milhar else corte
+
+    inteiro, centavos = (limpo, "") if corte < 0 else (limpo[:corte], limpo[corte + 1:])
+    inteiro = re.sub(r"[^0-9]", "", inteiro) or "0"
+    centavos = re.sub(r"[^0-9]", "", centavos) or "0"
+    valor = float(f"{inteiro}.{centavos}")
+    return -valor if negativo else valor
+
+
+class CampoDinheiro(QDoubleSpinBox):
+    """Campo de valor que escreve e lê como `moeda()`: R$ 1.234,56.
+
+    O QDoubleSpinBox cru mostrava "R$ 13.50" enquanto o resto do aplicativo
+    escrevia "R$ 13,50" — o mesmo número em duas línguas, na mesma tela. Só
+    trocar o locale conserta a exibição e estraga a digitação: o campo passa a
+    recusar o ponto do teclado numérico sem dizer por quê.
+
+    Por isso a formatação vem de `digitos_br()` (a mesma de `moeda()`) e a
+    leitura vem de `ler_dinheiro()`, que aceita as duas pontuações.
+    """
+
+    def __init__(self, maximo: float = 999999.0, pai: QWidget | None = None):
+        super().__init__(pai)
+        self.setLocale(QLocale(QLocale.Portuguese, QLocale.Brazil))
+        self.setDecimals(2)
+        self.setRange(0.0, maximo)
+        self.setPrefix("R$ ")
+
+    def textFromValue(self, valor: float) -> str:
+        sinal = "-" if round(valor, 2) < 0 else ""
+        return f"{sinal}{digitos_br(valor)}"
+
+    def valueFromText(self, texto: str) -> float:
+        return ler_dinheiro(texto)
+
+    def validate(self, texto: str, posicao: int):
+        if any(c not in _TECLAS_DE_VALOR for c in texto):
+            return (QValidator.Invalid, texto, posicao)
+        # "R$ " sozinho é o campo vazio no meio de uma edição: nem pronto nem
+        # errado. Marcar como inválido apagaria a tecla que ela acabou de dar.
+        if not any(c.isdigit() for c in texto):
+            return (QValidator.Intermediate, texto, posicao)
+        return (QValidator.Acceptable, texto, posicao)
 
 
 def titulo(texto: str, limite: int = LIMITE_TITULO) -> QLabel:
