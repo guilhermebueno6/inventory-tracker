@@ -32,6 +32,7 @@ from .models import (
     Saldo,
     StatusLote,
     TipoMovimento,
+    VendaItem,
 )
 
 
@@ -235,6 +236,85 @@ def ajustar(
     )
 
 
+# Motivos de ajuste manual (§5.5). O `modo` diz o que fazer com a quantidade
+# digitada, e o `tipo` é o que fica gravado no histórico:
+#
+#   saida  → sai do estoque (a quantidade é a perda)
+#   entrada→ entra no estoque (sobra encontrada)
+#   exato  → o estoque passa a ser exatamente a quantidade digitada
+#
+# PERDA é um tipo próprio, e não um AJUSTE genérico, porque perda tem custo: é o
+# que permite o balanço somar "R$ 84,00 perdidos em quebra" (services/financeiro.py).
+MOTIVOS_AJUSTE: dict[str, tuple[str, str, str]] = {
+    "quebra": ("Quebrou ou estragou", TipoMovimento.PERDA, "saida"),
+    "perda": ("Sumiu / não achei", TipoMovimento.PERDA, "saida"),
+    "brinde": ("Brinde ou uso próprio", TipoMovimento.PERDA, "saida"),
+    "devolucao_ruim": ("Voltou danificado", TipoMovimento.PERDA, "saida"),
+    "sobra": ("Achei mais do que tinha", TipoMovimento.AJUSTE, "entrada"),
+    "contagem": ("Contei a prateleira", TipoMovimento.INVENTARIO, "exato"),
+}
+
+
+def ajuste_manual(
+    session: Session,
+    produto: Produto,
+    motivo: str,
+    quantidade: int,
+    *,
+    descricao: str = "",
+    local_codigo: str = CASA,
+) -> Movimento | None:
+    """Correção de estoque feita à mão — perda, quebra, brinde ou contagem (§5.5).
+
+    Devolve None quando não houve diferença (contagem que bate com o sistema).
+    """
+    if motivo not in MOTIVOS_AJUSTE:
+        raise ErroEstoque(f"Motivo de ajuste desconhecido: {motivo}.")
+    rotulo, tipo, modo = MOTIVOS_AJUSTE[motivo]
+
+    if quantidade < 0:
+        raise ErroEstoque("A quantidade não pode ser negativa.")
+    if modo != "exato" and quantidade == 0:
+        raise ErroEstoque("Informe quantas unidades.")
+
+    observacao = f"{rotulo}: {descricao.strip()}" if descricao.strip() else rotulo
+
+    if modo == "exato":
+        atual = saldo_de(session, produto, local_codigo)
+        if quantidade == atual:
+            return None
+        return ajustar(
+            session, produto, quantidade, local_codigo=local_codigo, tipo=tipo,
+            observacao=f"{observacao} (de {atual} para {quantidade})",
+        )
+
+    delta = quantidade if modo == "entrada" else -quantidade
+    return registrar(
+        session, produto, delta, tipo,
+        local_codigo=local_codigo, observacao=observacao,
+    )
+
+
+def perdas_do_periodo(
+    session: Session, inicio: datetime, fim: datetime
+) -> list[tuple[Movimento, float]]:
+    """Perdas e o quanto cada uma custou. Alimenta o balanço (§5.8).
+
+    Valoriza pelo custo ATUAL do produto: perda não passa pela venda, então não
+    existe fotografia de custo para ela como existe em `VendaItem`.
+    """
+    movs = session.scalars(
+        select(Movimento)
+        .where(
+            Movimento.tipo == TipoMovimento.PERDA,
+            func.coalesce(Movimento.data_evento, Movimento.criado_em) >= inicio,
+            func.coalesce(Movimento.data_evento, Movimento.criado_em) <= fim,
+        )
+        .order_by(Movimento.criado_em.desc())
+    ).all()
+    return [(m, round(abs(m.quantidade) * (m.produto.custo or 0.0), 2)) for m in movs]
+
+
 def saldo_de(session: Session, produto: Produto, local_codigo: str = CASA) -> int:
     lid = local_id(session, local_codigo)
     s = session.scalar(
@@ -255,6 +335,11 @@ def desfazer_lote(session: Session, lote_id: int) -> int:
         select(func.count()).select_from(Movimento).where(Movimento.lote_id == lote_id)
     )
     session.execute(delete(Movimento).where(Movimento.lote_id == lote_id))
+    # O dinheiro sai junto com o estoque, senão o balanço continuaria contando
+    # vendas que a usuária acabou de desfazer. Linhas que este lote apenas
+    # ATUALIZOU (venda que já existia de um relatório anterior) ficam onde estão,
+    # com o lote que as criou — é o lote delas que as remove.
+    session.execute(delete(VendaItem).where(VendaItem.lote_id == lote_id))
     lote.status = StatusLote.DESFEITO
     session.flush()
     recalcular_saldos(session)
