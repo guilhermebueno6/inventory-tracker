@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 
 
 def _configurar_log():
@@ -29,6 +28,7 @@ def _verificar() -> int:
     """
     from .core import db, repo
     from .core.migracoes import revisao_do_banco
+    from .ui import marca
     from .version import APP_NAME, __version__
 
     _configurar_log()
@@ -50,6 +50,10 @@ def _verificar() -> int:
 
     app = QApplication.instance() or QApplication([])
     from .ui.main_window import JanelaPrincipal
+    from .ui.tema import vestir
+
+    vestir(app)
+    print(f"  fonte da marca: {marca.familia()}")
 
     # sem checar atualização: o teste de fumaça não deve depender de rede
     janela = JanelaPrincipal(db.sessao(), verificar_atualizacao=False)
@@ -69,6 +73,7 @@ def main() -> int:
     from .core import db
     from .services import backup
     from .ui.main_window import JanelaPrincipal
+    from .ui.tema import vestir
     from .version import APP_NAME
 
     _configurar_log()
@@ -86,9 +91,7 @@ def main() -> int:
 
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    estilo = Path(__file__).parent / "ui" / "style.qss"
-    if estilo.exists():
-        app.setStyleSheet(estilo.read_text(encoding="utf-8"))
+    vestir(app)
 
     janela = JanelaPrincipal(session)
     janela.show()

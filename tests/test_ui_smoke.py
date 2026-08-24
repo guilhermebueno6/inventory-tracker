@@ -372,3 +372,59 @@ def test_celulas_longas_guardam_o_texto_inteiro_no_tooltip(app, loja, session):
     tela.recarregar()
     assert tela.tabela.rowCount() == 1
     assert tela.tabela.item(0, 0).toolTip() == "KIT.AZULCUEIROSBABETEPANOBOCAFAIXA"
+
+
+# ------------------------------------------------------------- barra de título
+#
+# A navegação saiu de dentro de cada tela e virou chrome fixo (manual §05).
+# Se ela parar de acompanhar a tela atual, some a única pista de onde se está.
+
+
+def test_a_barra_de_titulo_acompanha_a_tela_aberta(app, loja, session):
+    from estoque_facil.ui.main_window import BALANCO, ESTOQUE, INICIO, JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+
+    def ativo():
+        return [i for i, b in j.barra.itens.items() if b.property("ativo") == "true"]
+
+    assert ativo() == [INICIO]
+    j.abrir_estoque()
+    assert ativo() == [ESTOQUE]
+    assert j.pilha.currentIndex() == ESTOQUE
+    j.abrir_balanco()
+    assert ativo() == [BALANCO]
+    j.voltar_inicio()
+    assert ativo() == [INICIO]
+
+
+def test_kits_so_aparece_na_navegacao_enquanto_houver_kit_pendente(app, loja, session):
+    from estoque_facil.core import kits, repo
+    from estoque_facil.ui.main_window import KITS, JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+    j.show()
+    j.voltar_inicio()
+    app.processEvents()
+    assert j.barra.itens[KITS].isVisible(), "74 kits pendentes: o item precisa existir"
+
+    for kit in kits.kits_sem_composicao(session):
+        session.delete(kit)
+    session.commit()
+    assert repo.contar(session)["kits"] == 1
+
+    j.voltar_inicio()
+    app.processEvents()
+    assert not j.barra.itens[KITS].isVisible()
+
+
+def test_clicar_na_marca_volta_para_o_inicio(app, loja, session):
+    """O cursor de mão sobre o lockup promete navegação — precisa cumprir."""
+    from estoque_facil.ui.main_window import INICIO, JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+    j.abrir_estoque()
+    assert j.pilha.currentIndex() != INICIO
+
+    j.barra.lockup.clicado.emit()
+    assert j.pilha.currentIndex() == INICIO

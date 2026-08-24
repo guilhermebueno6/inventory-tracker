@@ -1,0 +1,34 @@
+ESTOQUE FÁCIL — kit de logos
+================================
+
+/svg   vetores, escaláveis, para uso em qualquer tamanho
+/png   ícones do aplicativo, geometria exata pixel a pixel
+
+SÍMBOLO
+  simbolo-oficial            campo vermelho, barras brancas — versão padrão
+  simbolo-tema-escuro        barras na cor do fundo (#201E1D)
+  simbolo-mono-preto         impressão em uma cor / etiqueta térmica
+  simbolo-invertido          sobre faixa vermelha cheia
+  simbolo-3-barras-16px      obrigatório abaixo de 24 px
+
+LOCKUPS
+  lockup-horizontal          padrão (barra de título, login, site)
+  lockup-empilhado           espaços estreitos
+  wordmark                   documentos e notas fiscais
+
+ÍCONE DO APLICATIVO
+  Windows  -> 16, 32, 48, 256
+  macOS    -> 16, 32, 64, 128, 256, 512, 1024
+  Favicon  -> 16, 32
+  Quadrado cheio, sem borda e sem sombra: o sistema aplica a máscara.
+
+CORES
+  Vermelho  #EC3013     Tinta  #201E1D
+  Branco    #FFFFFF     Fundo  #F3F2F2
+
+TIPOGRAFIA
+  Archivo 700. Os arquivos de lockup e wordmark usam texto vivo em Archivo —
+  instale a fonte (fonts.google.com/specimen/Archivo) ou converta o texto em
+  contornos antes de enviar a terceiros.
+
+Regras completas: manual-da-marca.md

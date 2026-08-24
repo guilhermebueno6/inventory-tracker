@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -26,24 +25,29 @@ from ..core.models import TipoProduto
 from ..importers.ml_vendas_xlsx import ErroArquivoML
 from ..services import importacao
 from ..services.importacao import Situacao
+from . import marca
 from .tela_produto import TelaProduto
 from .widgets.comuns import (
     avisar,
     celula,
+    celula_numero,
     configurar_colunas,
     confirmar,
     dica,
     faixa,
     informar,
+    regua,
     titulo,
 )
 
+# Paleta mono (manual §03). O que separa as situações aqui é a aba em que a
+# linha está, não a cor: só o que exige ação da usuária ganha vermelho.
 CORES = {
-    Situacao.PRONTA: QColor("#1b5e20"),
-    Situacao.ATENCAO: QColor("#8a5300"),
-    Situacao.SEM_CADASTRO: QColor("#b3261e"),
-    Situacao.JA_PROCESSADA: QColor("#7a7a80"),
-    Situacao.NAO_ABATE: QColor("#7a7a80"),
+    Situacao.PRONTA: QColor(marca.TINTA),
+    Situacao.ATENCAO: QColor(marca.CINZA),
+    Situacao.SEM_CADASTRO: QColor(marca.VERMELHO_ESCURO),
+    Situacao.JA_PROCESSADA: QColor(marca.DESABILITADO),
+    Situacao.NAO_ABATE: QColor(marca.DESABILITADO),
 }
 TITULOS = {
     Situacao.PRONTA: "Prontas",
@@ -78,6 +82,7 @@ class TelaImportacao(QDialog):
         self.lay = QVBoxLayout(self)
         self.lay.setSpacing(12)
         self.lay.addWidget(titulo("Conferir vendas"))
+        self.lay.addWidget(regua())
         self.lb_arquivo = dica(f"Arquivo: {self.caminho.name}")
         self.lay.addWidget(self.lb_arquivo)
 
@@ -177,9 +182,7 @@ class TelaImportacao(QDialog):
             tabela.insertRow(i)
             tabela.setItem(i, 0, celula(linha.origem.numero_venda))
             tabela.setItem(i, 1, celula(linha.descricao))
-            qtd = QTableWidgetItem(str(linha.origem.quantidade))
-            qtd.setTextAlignment(Qt.AlignCenter)
-            tabela.setItem(i, 2, qtd)
+            tabela.setItem(i, 2, celula_numero(str(linha.origem.quantidade)))
 
             if linha.baixas:
                 detalhe = ", ".join(f"−{q} {p.rotulo}" for p, q in linha.baixas)

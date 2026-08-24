@@ -583,7 +583,8 @@ Acima deles, uma faixa de alertas: *"3 itens acabando — isso trava 5 kits"*.
 - **Sem jargão.** "SKU" → *Código do produto*. "Composição/BOM" → *"Este kit é montado com"*. "Movimento de estoque" → *Histórico*.
 - **Fonte base 14pt**, alvos de clique de no mínimo 40px.
 - **Uma busca só**, que procura em nome, código e código de barras ao mesmo tempo. Com 200 itens, filtro incremental em memória basta.
-- **Cor com significado consistente:** vermelho = abaixo do mínimo ou negativo; amarelo = atenção; verde = ok. Sempre acompanhado de texto — não depender só da cor.
+- **Cor com significado consistente**, sempre acompanhada de texto — não depender só da cor. A paleta é a do [manual da marca](../design-document.md) §03, que é **mono**: um vermelho só, sobre tinta e cinza. Então: vermelho `#B32309` = abaixo do mínimo, negativo ou pendente; cinza `#6F6863` = atenção e texto secundário; tinta `#201E1D` = normal e resultado positivo. **Não existe verde nem amarelo** — a distinção que antes era matiz agora é peso da letra (kit em 700, item em 400) e a régua de 2px da faixa. Isso é uma mudança em relação à primeira versão desta seção, e vale porque a regra “sempre acompanhado de texto” já estava valendo: nenhuma informação dependia do matiz para ser lida.
+- **Tipografia Archivo**, nos pesos 400/600/700 do manual §04, empacotada com o app. Números de tabela sempre tabulares. Tudo alinhado à esquerda, inclusive cabeçalho de tabela e rótulo de formulário.
 - **Kit nunca parece produto simples.** Ícone diferente, "dá para montar" em vez de quantidade, e campo de estoque bloqueado com a explicação *"O estoque do kit vem dos itens que o compõem."*
 - **Toda ação destrutiva pede confirmação em português claro**, com número: *"Você vai dar baixa de 61 unidades em 22 produtos. Confirmar?"*
 - **Desfazer sempre visível** depois de qualquer operação em lote.
@@ -643,12 +644,18 @@ inventory-tracker/
 │   │   └── updater.py
 │   ├── ui/
 │   │   ├── main_window.py
+│   │   ├── marca.py            # tokens da marca: cor, tipografia, símbolo
+│   │   ├── tema.py             # aplica fonte + QSS + ícone no QApplication
 │   │   ├── tela_estoque.py
 │   │   ├── tela_importacao.py  # tela de conferência do §5.1
 │   │   ├── tela_produto.py     # inclui editor de composição
 │   │   ├── widgets/
-│   │   └── style.qss
+│   │   └── style.qss           # gerado a partir de marca.py (tokens @NOME@)
 │   └── resources/
+│       ├── fontes/             # Archivo variável (OFL) + licença
+│       ├── marca/              # símbolo, lockups, ícones, setas do QSS
+│       ├── icone.ico           # instalador e executável Windows
+│       └── icone.icns          # bundle do macOS
 ├── alembic/
 ├── tests/
 │   └── fixtures/               # XLSX reais anonimizados
@@ -666,6 +673,8 @@ inventory-tracker/
 ```
 
 **Regra de arquitetura:** `core/` e `importers/` **não importam nada de `ui/`**. Toda regra de negócio é testável sem abrir janela. É isso que torna o app confiável.
+
+**Regra do sistema visual:** nenhum hex de cor e nenhum nome de fonte fora de `ui/marca.py`. O `style.qss` recebe os valores por substituição de token, e `tests/test_marca.py` falha se alguma cor escapar para dentro de uma tela.
 
 ---
 

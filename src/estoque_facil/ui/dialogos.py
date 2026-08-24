@@ -40,6 +40,7 @@ from .widgets.comuns import (
     dica,
     informar,
     moeda,
+    regua,
     titulo,
 )
 
@@ -71,6 +72,7 @@ class DialogoEntrada(QDialog):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
         lay.addWidget(titulo("Entrada de mercadoria"))
+        lay.addWidget(regua())
         lay.addWidget(dica("Registre o que chegou. Kits não entram aqui — só os itens."))
 
         form = QFormLayout()
@@ -159,6 +161,7 @@ class DialogoImportacoes(QDialog):
 
         lay = QVBoxLayout(self)
         lay.addWidget(titulo("Importações feitas"))
+        lay.addWidget(regua())
         lay.addWidget(dica("Desfazer devolve o estoque ao que era antes daquela importação."))
 
         self.tabela = QTableWidget(0, 6)
@@ -322,6 +325,7 @@ class DialogoAjuste(QDialog):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
         lay.addWidget(titulo("Ajuste de estoque"))
+        lay.addWidget(regua())
         lay.addWidget(dica(
             "Use aqui o que saiu sem venda: quebrou, sumiu, virou brinde — "
             "ou o resultado de uma contagem na prateleira."
@@ -453,6 +457,7 @@ class DialogoDespesa(QDialog):
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
         lay.addWidget(titulo("Lançar despesa"))
+        lay.addWidget(regua())
         lay.addWidget(dica(
             "Gastos da loja que não são mercadoria. Compra de produto não entra "
             "aqui — ela vira custo sozinha quando o produto é vendido."
@@ -524,6 +529,7 @@ class DialogoDespesas(QDialog):
 
         lay = QVBoxLayout(self)
         lay.addWidget(titulo("Despesas"))
+        lay.addWidget(regua())
 
         topo = QHBoxLayout()
         self.f_inicio = campo_data(self._inicio)

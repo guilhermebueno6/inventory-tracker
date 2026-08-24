@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QComboBox,
@@ -19,7 +19,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -27,16 +26,19 @@ from PySide6.QtWidgets import (
 from ..services import financeiro
 from .dialogos import DialogoDespesa, DialogoDespesas, campo_data, data_de
 from .widgets.comuns import (
-    VERDE,
-    VERMELHO,
+    NEGATIVO,
+    POSITIVO,
     avisar,
     celula,
+    celula_numero,
     configurar_colunas,
     dica,
     faixa,
     informar,
     moeda,
     numero,
+    regua,
+    rotulo,
     secao,
     titulo,
 )
@@ -53,14 +55,33 @@ class TelaBalanco(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
-        lay.addWidget(titulo("Balanço"))
+        # As ações vão na linha do título, e não junto do seletor de período:
+        # em Archivo 700 os três botões mais as duas datas não cabiam em 1080px
+        # de janela, e "Lançar despesa" saía cortada no meio da palavra.
+        cabecalho = QHBoxLayout()
+        cabecalho.setSpacing(10)
+        cabecalho.addWidget(titulo("Balanço"))
+        cabecalho.addStretch(1)
+
+        bt_despesa = QPushButton("Lançar despesa")
+        bt_despesa.setObjectName("primario")
+        bt_despesa.clicked.connect(self.lancar_despesa)
+        bt_despesas = QPushButton("Ver despesas")
+        bt_despesas.clicked.connect(self.ver_despesas)
+        bt_exportar = QPushButton("Exportar planilha")
+        bt_exportar.clicked.connect(self.exportar)
+        for b in (bt_despesas, bt_exportar, bt_despesa):
+            cabecalho.addWidget(b)
+        lay.addLayout(cabecalho)
+        lay.addWidget(regua())
 
         # ------------------------------------------------------------- período
         topo = QHBoxLayout()
+        topo.setSpacing(10)
         self.periodo = QComboBox()
         self._opcoes = financeiro.periodos()
-        for rotulo, _i, _f in self._opcoes:
-            self.periodo.addItem(rotulo)
+        for nome, _i, _f in self._opcoes:
+            self.periodo.addItem(nome)
         self.periodo.addItem(PERSONALIZADO)
         self.periodo.currentIndexChanged.connect(self._trocou_periodo)
 
@@ -72,21 +93,12 @@ class TelaBalanco(QWidget):
         self.f_inicio.dateChanged.connect(self.recarregar)
         self.f_fim.dateChanged.connect(self.recarregar)
 
+        topo.addWidget(rotulo("Período"))
         topo.addWidget(self.periodo)
         topo.addWidget(self.f_inicio)
         topo.addWidget(self.lb_ate)
         topo.addWidget(self.f_fim)
         topo.addStretch(1)
-
-        bt_despesa = QPushButton("Lançar despesa")
-        bt_despesa.setObjectName("primario")
-        bt_despesa.clicked.connect(self.lancar_despesa)
-        bt_despesas = QPushButton("Ver despesas")
-        bt_despesas.clicked.connect(self.ver_despesas)
-        bt_exportar = QPushButton("Exportar planilha")
-        bt_exportar.clicked.connect(self.exportar)
-        for b in (bt_despesa, bt_despesas, bt_exportar):
-            topo.addWidget(b)
         lay.addLayout(topo)
 
         # ------------------------------------------------------------ resposta
@@ -156,18 +168,18 @@ class TelaBalanco(QWidget):
     # -------------------------------------------------------------------- dados
 
     def recarregar(self):
-        rotulo, inicio, fim = self.periodo_atual()
+        nome, inicio, fim = self.periodo_atual()
         if inicio > fim:
             self.faixa_resultado.atualizar(
                 "A data inicial está depois da final — inverta as duas.", "alerta"
             )
             return
         self.balanco = financeiro.apurar(self.session, inicio, fim)
-        self._desenhar_resultado(rotulo)
+        self._desenhar_resultado(nome)
         self._desenhar_conta()
         self._desenhar_produtos()
 
-    def _desenhar_resultado(self, rotulo: str):
+    def _desenhar_resultado(self, nome: str):
         b = self.balanco
         if not b.tem_dados:
             self.faixa_resultado.atualizar(
@@ -178,7 +190,7 @@ class TelaBalanco(QWidget):
             return
         verbo = "Sobrou" if b.lucro >= 0 else "Faltou"
         texto = (
-            f"{verbo} {moeda(abs(b.lucro))} em {rotulo.lower()} — "
+            f"{verbo} {moeda(abs(b.lucro))} em {nome.lower()} — "
             f"margem de {numero(b.margem)}% sobre {moeda(b.receita_produtos)} "
             f"vendidos em {b.vendas} venda(s)."
         )
@@ -198,19 +210,21 @@ class TelaBalanco(QWidget):
         for texto, valor, tipo in b.linhas():
             i = self.tabela.rowCount()
             self.tabela.insertRow(i)
-            rotulo = celula(texto)
-            item_valor = QTableWidgetItem(moeda(valor))
-            item_valor.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            if tipo in ("subtotal", "resultado"):
-                rotulo.setFont(negrito)
-                item_valor.setFont(negrito)
+            forte = tipo in ("subtotal", "resultado")
+            item_rotulo = celula(texto)
+            # a coluna de dinheiro é sempre tabular: é uma conta sendo lida de
+            # cima para baixo, e vírgula fora de prumo atrapalha a soma de olho
+            item_valor = celula_numero(moeda(valor), negrito=forte)
+            if forte:
+                item_rotulo.setFont(negrito)
             if tipo == "resultado":
-                cor = QColor(VERDE if valor >= 0 else VERMELHO)
-                rotulo.setForeground(QBrush(cor))
+                # paleta mono: sobrou é tinta cheia, faltou é vermelho escuro
+                cor = QColor(POSITIVO if valor >= 0 else NEGATIVO)
+                item_rotulo.setForeground(QBrush(cor))
                 item_valor.setForeground(QBrush(cor))
             elif round(valor, 2) < 0:
-                item_valor.setForeground(QBrush(QColor(VERMELHO)))
-            self.tabela.setItem(i, 0, rotulo)
+                item_valor.setForeground(QBrush(QColor(NEGATIVO)))
+            self.tabela.setItem(i, 0, item_rotulo)
             self.tabela.setItem(i, 1, item_valor)
 
         altura = (self.tabela.horizontalHeader().height() or 30)
@@ -238,19 +252,13 @@ class TelaBalanco(QWidget):
             i = self.tabela_produtos.rowCount()
             self.tabela_produtos.insertRow(i)
             self.tabela_produtos.setItem(i, 0, celula(linha.titulo))
-            unidades = QTableWidgetItem(str(linha.unidades))
-            unidades.setTextAlignment(Qt.AlignCenter)
-            self.tabela_produtos.setItem(i, 1, unidades)
+            self.tabela_produtos.setItem(i, 1, celula_numero(str(linha.unidades)))
             for coluna, valor in ((2, linha.receita), (3, linha.lucro)):
-                item = QTableWidgetItem(moeda(valor))
-                item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                item = celula_numero(moeda(valor))
                 if round(valor, 2) < 0:
-                    item.setForeground(QBrush(QColor(VERMELHO)))
+                    item.setForeground(QBrush(QColor(NEGATIVO)))
                 self.tabela_produtos.setItem(i, coluna, item)
-            margem = QTableWidgetItem(
-                f"{linha.margem:.0f}%" if linha.receita else "—"
-            )
-            margem.setTextAlignment(Qt.AlignCenter)
+            margem = celula_numero(f"{linha.margem:.0f}%" if linha.receita else "—")
             if linha.custo <= 0:
                 margem.setText("sem custo")
                 margem.setToolTip(

@@ -10,7 +10,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QPushButton,
     QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -20,7 +19,16 @@ from ..core.models import Produto, TipoProduto
 from ..services import sugestao
 from .dialogos import excluir_produto
 from .tela_produto import TelaProduto
-from .widgets.comuns import celula, configurar_colunas, dica, faixa, titulo
+from .widgets.comuns import (
+    celula,
+    celula_numero,
+    configurar_colunas,
+    dica,
+    faixa,
+    moeda,
+    regua,
+    titulo,
+)
 
 
 class TelaKitsPendentes(QWidget):
@@ -31,6 +39,7 @@ class TelaKitsPendentes(QWidget):
         self.lay = QVBoxLayout(self)
         self.lay.setSpacing(12)
         self.lay.addWidget(titulo("Kits sem composição"))
+        self.lay.addWidget(regua())
         self.lay.addWidget(
             dica(
                 "Cada kit precisa saber de que itens é montado. "
@@ -87,9 +96,7 @@ class TelaKitsPendentes(QWidget):
             self.tabela.insertRow(i)
             self.tabela.setItem(i, 0, celula(p.sku))
             self.tabela.setItem(i, 1, celula(p.nome or "—"))
-            custo = QTableWidgetItem(f"R$ {p.custo:.2f}")
-            custo.setTextAlignment(Qt.AlignCenter)
-            self.tabela.setItem(i, 2, custo)
+            self.tabela.setItem(i, 2, celula_numero(moeda(p.custo)))
             candidatos = sugestao.sugerir_componentes(self.session, p, 3)
             texto = ", ".join(c.rotulo for _s, c in candidatos) or "—"
             self.tabela.setItem(i, 3, celula(texto))
