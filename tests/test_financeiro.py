@@ -7,6 +7,7 @@ O invariante desta parte é o irmão do invariante do estoque:
 
 Nada de balanço é guardado como saldo: tudo é recalculado, sempre.
 """
+import csv
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -348,6 +349,37 @@ def test_exporta_a_planilha_do_periodo(loja, session, tmp_path):
     assert "Balanço do período" in texto
     assert "= Lucro do período" in texto
     assert "Caixas" in texto
+
+
+def test_cada_bloco_da_planilha_tem_cabecalho_do_tamanho_das_linhas(loja, session, tmp_path):
+    """Cabeçalho curto joga o valor para uma coluna sem título — ela abre no
+    Excel e vê 'Valor (R$)' em cima da categoria da despesa."""
+    _importar(session)
+    financeiro.registrar_despesa(session, "Caixas", 200, data=datetime(2026, 8, 3))
+    session.commit()
+
+    b = financeiro.apurar(session, *PERIODO)
+    destino = financeiro.exportar_csv(session, b, tmp_path / "balanco.csv")
+
+    with open(destino, newline="", encoding="utf-8-sig") as fh:
+        linhas = list(csv.reader(fh, delimiter=";"))
+
+    blocos: list[list[list[str]]] = [[]]
+    for linha in linhas:
+        if not linha:
+            blocos.append([])
+        else:
+            blocos[-1].append(linha)
+    blocos = [bloco for bloco in blocos if len(bloco) > 1]
+    # Um bloco pode abrir com o título dele sozinho na primeira célula.
+    blocos = [bloco[1:] if len(bloco[0]) == 1 else bloco for bloco in blocos]
+
+    despesas = next(bl for bl in blocos if bl[0][0] == "Data")
+    assert despesas[0] == ["Data", "Categoria", "Descrição", "Valor (R$)"]
+    for bloco in blocos:
+        cabecalho, *corpo = bloco
+        for linha in corpo:
+            assert len(linha) == len(cabecalho), f"{linha} não cabe em {cabecalho}"
 
 
 def test_o_backup_leva_o_dinheiro_junto(loja, session, tmp_path):

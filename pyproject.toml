@@ -1,6 +1,6 @@
 [project]
 name = "estoque-facil"
-version = "0.2.0"
+version = "0.2.1"
 description = "Controle de estoque para loja do Mercado Livre"
 requires-python = ">=3.11"
 dependencies = [

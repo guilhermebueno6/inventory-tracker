@@ -316,7 +316,8 @@ def exportar_csv(session: Session, balanco: Balanco, destino: Path | str) -> Pat
             w.writerow([rotulo, f"{valor:.2f}".replace(".", ",")])
 
         w.writerow([])
-        w.writerow(["Despesas do período", "Valor (R$)"])
+        w.writerow(["Despesas do período"])
+        w.writerow(["Data", "Categoria", "Descrição", "Valor (R$)"])
         for despesa in listar_despesas(session, balanco.inicio, balanco.fim):
             w.writerow([
                 f"{despesa.data:%d/%m/%Y}",
