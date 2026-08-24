@@ -418,6 +418,48 @@ def test_kits_so_aparece_na_navegacao_enquanto_houver_kit_pendente(app, loja, se
     assert not j.barra.itens[KITS].isVisible()
 
 
+def test_kits_continua_na_navegacao_depois_de_visitar_e_voltar(app, loja, session):
+    """Bug: a aba sumia ao voltar de qualquer tela e nunca mais voltava.
+
+    A visibilidade vinha de `bt_kits.isVisible()`, perguntado com a tela inicial
+    ainda fora da pilha — no Qt, filho de pai escondido é sempre invisível.
+    """
+    from estoque_facil.ui.main_window import KITS, JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+    j.show()
+    app.processEvents()
+
+    for abrir in (j.abrir_kits, j.abrir_estoque, j.abrir_balanco):
+        abrir()
+        app.processEvents()
+        j.voltar_inicio()
+        app.processEvents()
+        assert j.barra.itens[KITS].isVisible(), (
+            f"a aba de Kits sumiu depois de {abrir.__name__} e voltar"
+        )
+
+
+def test_a_aba_de_kits_nao_some_debaixo_de_quem_esta_nela(app, loja, session):
+    """Configurar o último kit não pode apagar a aba da tela que está aberta."""
+    from estoque_facil.core import kits
+    from estoque_facil.ui.main_window import KITS, JanelaPrincipal
+
+    j = JanelaPrincipal(session, verificar_atualizacao=False)
+    j.show()
+    for kit in kits.kits_sem_composicao(session):
+        session.delete(kit)
+    session.commit()
+
+    j.abrir_kits()
+    app.processEvents()
+    assert j.barra.itens[KITS].isVisible()
+
+    j.voltar_inicio()
+    app.processEvents()
+    assert not j.barra.itens[KITS].isVisible(), "sem kit pendente, a aba sai"
+
+
 def test_clicar_na_marca_volta_para_o_inicio(app, loja, session):
     """O cursor de mão sobre o lockup promete navegação — precisa cumprir."""
     from estoque_facil.ui.main_window import INICIO, JanelaPrincipal

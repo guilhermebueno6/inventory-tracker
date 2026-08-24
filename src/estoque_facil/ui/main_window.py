@@ -168,6 +168,10 @@ class TelaInicial(QWidget):
         self.lay.addStretch(1)
         self.lay.addWidget(regua(clara=True))
         self.lay.addWidget(dica(f"Versão {__version__}"))
+
+        # Estado do DADO, não do widget: quem pergunta "tem kit pendente?" pode
+        # estar com esta tela fora da pilha, e aí `bt_kits.isVisible()` mente.
+        self.tem_kits_pendentes = False
         self.recarregar()
 
     def _bloco_do_mes(self) -> QFrame:
@@ -256,9 +260,12 @@ class TelaInicial(QWidget):
 
         self.faixa_alerta.atualizar(texto, tipo)
         self._mostrar_mes(session)
-        self.bt_kits.setVisible(bool(pendentes))
+        self.tem_kits_pendentes = bool(pendentes)
+        self.bt_kits.setVisible(self.tem_kits_pendentes)
         if pendentes:
             self.bt_kits.setText(f"Configurar os {len(pendentes)} kits que faltam")
+
+
 class JanelaPrincipal(QMainWindow):
     def __init__(self, session, verificar_atualizacao: bool = True):
         super().__init__()
@@ -291,6 +298,9 @@ class JanelaPrincipal(QMainWindow):
         self.setCentralWidget(corpo)
 
         self._menu()
+        # A barra nasce com todos os itens; sem isto a aba de Kits aparece na
+        # abertura mesmo para quem já configurou todos os kits.
+        self._atualizar_navegacao(INICIO)
         self.statusBar().showMessage("Pronto")
 
         self.importando = False          # nunca atualizar no meio de uma importação
@@ -334,13 +344,30 @@ class JanelaPrincipal(QMainWindow):
 
     # ------------------------------------------------------------ navegação
 
+    def _atualizar_navegacao(self, indice: int | None = None) -> None:
+        """Liga/desliga a aba de Kits a partir do dado.
+
+        Antes isto perguntava `self.inicial.bt_kits.isVisible()`. Como a tela
+        inicial fica escondida enquanto outra tela está na pilha, a resposta era
+        sempre "não" ao voltar de qualquer tela — a aba sumia e nunca mais
+        voltava. A aba nunca é escondida debaixo de quem está nela.
+        """
+        if indice is None:
+            indice = self.pilha.currentIndex()
+        self.barra.mostrar_kits(self.inicial.tem_kits_pendentes or indice == KITS)
+
+    def _recarregar_inicial(self) -> None:
+        """Recarrega a tela inicial e deixa a navegação de acordo com ela."""
+        self.inicial.recarregar()
+        self._atualizar_navegacao()
+
     def _ir_para(self, indice: int) -> None:
         self.pilha.setCurrentIndex(indice)
         self.barra.marcar(indice)
+        self._atualizar_navegacao(indice)
 
     def voltar_inicio(self):
         self.inicial.recarregar()
-        self.barra.mostrar_kits(self.inicial.bt_kits.isVisible())
         self._ir_para(INICIO)
 
     def abrir_estoque(self):
@@ -363,7 +390,7 @@ class JanelaPrincipal(QMainWindow):
                      "Importe seu catálogo primeiro, em Arquivo → Importar catálogo.")
             return
         DialogoEntrada(self.session, self).exec()
-        self.inicial.recarregar()
+        self._recarregar_inicial()
         self.estoque.recarregar()
 
     def abrir_ajuste(self):
@@ -372,22 +399,22 @@ class JanelaPrincipal(QMainWindow):
                      "Importe seu catálogo primeiro, em Arquivo → Importar catálogo.")
             return
         DialogoAjuste(self.session, None, self).exec()
-        self.inicial.recarregar()
+        self._recarregar_inicial()
         self.estoque.recarregar()
 
     def lancar_despesa(self):
         if DialogoDespesa(self.session, self).exec():
             self.balanco.recarregar()
-            self.inicial.recarregar()
+            self._recarregar_inicial()
 
     def abrir_despesas(self):
         DialogoDespesas(self.session, pai=self).exec()
         self.balanco.recarregar()
-        self.inicial.recarregar()
+        self._recarregar_inicial()
 
     def abrir_importacoes(self):
         DialogoImportacoes(self.session, self).exec()
-        self.inicial.recarregar()
+        self._recarregar_inicial()
         self.estoque.recarregar()
 
     def importar_vendas(self):
@@ -416,7 +443,7 @@ class JanelaPrincipal(QMainWindow):
                 f"{extra}\n\nSe algo saiu errado, use Vendas → Ver importações "
                 "para desfazer.",
             )
-        self.inicial.recarregar()
+        self._recarregar_inicial()
         self.estoque.recarregar()
         self.kits_pendentes.recarregar()
         self.balanco.recarregar()
@@ -442,7 +469,7 @@ class JanelaPrincipal(QMainWindow):
             f"{resumo.kits_marcados} foram marcados como kit — confira se está certo "
             "e depois monte a composição de cada um.",
         )
-        self.inicial.recarregar()
+        self._recarregar_inicial()
         self.estoque.recarregar()
         self.kits_pendentes.recarregar()
 
