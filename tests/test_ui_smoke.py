@@ -4,6 +4,7 @@ Não testa aparência: testa que a interface não quebra ao montar com dados de
 verdade — 195 produtos, 75 kits, 51 vendas.
 """
 import os
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QDate  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from estoque_facil.core import kits, repo  # noqa: E402
@@ -33,7 +35,8 @@ def sem_modais(monkeypatch):
     (o item não entrou na composição), não o popup.
     """
     for modulo in ("estoque_facil.ui.tela_produto", "estoque_facil.ui.tela_importacao",
-                   "estoque_facil.ui.main_window", "estoque_facil.ui.dialogos"):
+                   "estoque_facil.ui.main_window", "estoque_facil.ui.dialogos",
+                   "estoque_facil.ui.tela_balanco"):
         for func in ("avisar", "informar"):
             monkeypatch.setattr(f"{modulo}.{func}", lambda *a, **k: None, raising=False)
         monkeypatch.setattr(f"{modulo}.confirmar", lambda *a, **k: True, raising=False)
@@ -217,6 +220,82 @@ def test_tela_de_importacao_classifica_as_linhas(app, loja, session, monkeypatch
     assert "venda" in a.resumo().lower()
 
 
+# ------------------------------------------------------------------- balanço
+
+
+def test_tela_de_balanco_mostra_a_conta_fechada(app, loja, session):
+    """A tela precisa abrir com dados de verdade e fechar a conta na última linha."""
+    from estoque_facil.services import financeiro, importacao
+    from estoque_facil.ui.tela_balanco import TelaBalanco
+
+    analise = importacao.analisar_vendas(session, FIXTURES / "vendas_ml_exemplo.xlsx")
+    importacao.confirmar_vendas(session, analise)
+    financeiro.registrar_despesa(
+        session, "Caixas de papelão", 200, data=datetime(2026, 8, 3)
+    )
+    session.commit()
+
+    tela = TelaBalanco(session)
+    # o relatório é de agosto de 2026; a tela abre no mês corrente
+    tela.periodo.setCurrentIndex(tela.periodo.count() - 1)   # "Escolher as datas…"
+    tela.f_inicio.setDate(QDate(2026, 8, 1))
+    tela.f_fim.setDate(QDate(2026, 8, 31))
+    tela.recarregar()
+
+    assert tela.balanco is not None
+    assert tela.balanco.vendas == 51
+    assert tela.tabela.rowCount() == len(tela.balanco.linhas())
+    assert tela.tabela.item(tela.tabela.rowCount() - 1, 0).text().startswith("= Lucro")
+    assert tela.tabela_produtos.rowCount() > 0
+    assert "R$" in tela.tabela.item(0, 1).text()
+    assert "Caixas" not in tela.lb_despesas.text()      # a linha mostra a categoria
+    assert "R$ 200,00" in tela.lb_despesas.text()
+
+
+def test_dialogo_de_despesa_lanca_e_o_balanco_ve(app, loja, session):
+    from estoque_facil.services import financeiro
+    from estoque_facil.ui.dialogos import DialogoDespesa
+
+    d = DialogoDespesa(session)
+    d.descricao.setText("Anúncio patrocinado")
+    d.valor.setValue(75.5)
+    d._salvar()
+
+    hoje = datetime.now()
+    b = financeiro.apurar(session, *financeiro.mes(hoje.year, hoje.month))
+    assert b.despesas == 75.5
+    assert b.lucro == -75.5
+
+
+def test_dialogo_de_despesa_recusa_sem_descricao(app, loja, session):
+    from estoque_facil.services import financeiro
+    from estoque_facil.ui.dialogos import DialogoDespesa
+
+    d = DialogoDespesa(session)
+    d.valor.setValue(30)
+    d._salvar()                     # sem descrição: o aviso está silenciado no teste
+    assert financeiro.listar_despesas(session) == []
+
+
+def test_dialogo_de_ajuste_registra_perda(app, loja, session):
+    from estoque_facil.core import ledger, repo
+    from estoque_facil.ui.dialogos import DialogoAjuste
+
+    produto = repo.por_sku(session, "mord.mao.rosa")
+    ledger.entrada_compra(session, produto, 10)
+    session.commit()
+
+    d = DialogoAjuste(session, produto)
+    assert d.combo.currentData() == produto.id, "abre já no produto selecionado"
+    d.motivo.setCurrentIndex(0)                     # "Quebrou ou estragou"
+    d.qtd.setValue(3)
+    d.descricao.setText("caixa molhada")
+    assert "perda de R$" in d.lb_efeito.text()
+    d._salvar()
+
+    assert ledger.saldo_de(session, produto) == 7
+
+
 # --------------------------------------------------------------------- layout
 #
 # Testes de regressão do layout. O primeiro relato de bug foi exatamente isto:
@@ -268,10 +347,11 @@ def test_dialogo_nao_fica_maior_que_a_tela(app, loja, session):
 
 def test_colunas_cabem_na_largura_da_tabela(app, loja, session):
     """Nenhuma coluna pode ser empurrada para fora da tabela."""
+    from estoque_facil.ui.tela_balanco import TelaBalanco
     from estoque_facil.ui.tela_estoque import TelaEstoque
     from estoque_facil.ui.tela_kits import TelaKitsPendentes
 
-    for tela in (TelaEstoque(session), TelaKitsPendentes(session)):
+    for tela in (TelaEstoque(session), TelaKitsPendentes(session), TelaBalanco(session)):
         tela.resize(1080, 720)
         tela.show()
         app.processEvents()

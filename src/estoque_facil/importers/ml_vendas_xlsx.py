@@ -42,6 +42,17 @@ COL = {
     "pacote": 6,
     "kit_ml": 7,
     "unidades": 8,
+    # Bloco do dinheiro (§2.2). Tarifas e custos já vêm NEGATIVOS do ML, e a
+    # soma de 9 a 18 fecha exatamente na coluna 19 — conferido no arquivo real.
+    "receita_produtos": 9,
+    "acrescimo": 10,
+    "parcelamento": 11,
+    "tarifa_venda": 12,
+    "receita_envio": 13,
+    "tarifa_envio": 14,
+    "custo_envio": 15,
+    "custo_medidas": 16,
+    "descontos": 17,
     "cancelamento": 18,
     "total": 19,
     "sku": 23,
@@ -105,6 +116,21 @@ def _data_do_nome(caminho: Path) -> datetime | None:
         return None
 
 
+def _decimal(txt: str) -> float:
+    """Dinheiro do relatório. Célula vazia do ML é ' ', e o separador varia."""
+    txt = (txt or "").strip().replace("R$", "").strip()
+    if not txt:
+        return 0.0
+    if "," in txt and "." in txt:
+        txt = txt.replace(".", "").replace(",", ".")
+    else:
+        txt = txt.replace(",", ".")
+    try:
+        return float(txt)
+    except ValueError:
+        return 0.0
+
+
 def _inteiro(txt: str) -> int:
     if not txt:
         return 0
@@ -143,6 +169,23 @@ class LinhaVenda:
     total: float
     preco_unitario: float
     linha_planilha: int
+
+    # Dinheiro (§2.2). Guardado para o balanço — ver services/financeiro.py.
+    receita_produtos: float = 0.0
+    receita_envio: float = 0.0
+    tarifa_venda: float = 0.0        # negativo: comissão do ML + parcelamento
+    tarifa_envio: float = 0.0        # negativo: fretes e diferenças de medida
+    descontos: float = 0.0           # acréscimos e bônus, com o sinal do ML
+    cancelamentos: float = 0.0       # estornos, negativos
+
+    @property
+    def confere(self) -> bool:
+        """As partes somam o total do relatório? Vale como sanidade do parser."""
+        soma = (
+            self.receita_produtos + self.receita_envio + self.tarifa_venda
+            + self.tarifa_envio + self.descontos + self.cancelamentos
+        )
+        return abs(round(soma - self.total, 2)) <= 0.02
 
     @property
     def abate(self) -> bool:
@@ -234,9 +277,20 @@ def ler(caminho: str | Path) -> RelatorioML:
                 devolvidas=_inteiro(g("dev_unidades")),
                 dev_destino=g("dev_destino"),
                 cancelada=bool(g("cancelamento")),
-                total=float(g("total").replace(",", ".") or 0),
-                preco_unitario=float(g("preco").replace(",", ".") or 0),
+                total=_decimal(g("total")),
+                preco_unitario=_decimal(g("preco")),
                 linha_planilha=offset,
+                receita_produtos=_decimal(g("receita_produtos")),
+                receita_envio=_decimal(g("receita_envio")),
+                # parcelamento é custo de venda, não receita: entra na tarifa
+                tarifa_venda=_decimal(g("tarifa_venda")) + _decimal(g("parcelamento")),
+                tarifa_envio=(
+                    _decimal(g("tarifa_envio"))
+                    + _decimal(g("custo_envio"))
+                    + _decimal(g("custo_medidas"))
+                ),
+                descontos=_decimal(g("acrescimo")) + _decimal(g("descontos")),
+                cancelamentos=_decimal(g("cancelamento")),
             )
         )
 

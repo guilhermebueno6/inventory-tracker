@@ -38,7 +38,7 @@ Princípio que guia todas as decisões abaixo: **é melhor o app recusar uma ope
 ### 1.2 Fora de escopo (v1)
 
 - Emissão de nota fiscal.
-- Controle financeiro/contábil completo (DRE, fluxo de caixa).
+- Contabilidade completa (fluxo de caixa, conciliação bancária, regime de competência). O balanço da §5.8 é gerencial: responde *"sobrou dinheiro no mês?"*, não substitui o contador.
 - Multiusuário simultâneo.
 - Integração com outros marketplaces (Shopee, Amazon).
 - Gestão detalhada do estoque no Full.
@@ -290,6 +290,33 @@ id, chave (sku_ml | mlb+variacao), produto_id, criado_em
 
 **`config`** — `chave, valor`
 
+### 4.4 As tabelas do dinheiro
+
+Quantidade e valor são **tabelas separadas**, de propósito. `movimento` responde *"quanto tem"*; `venda_item` responde *"quanto entrou"*. Misturar as duas quebraria o invariante do estoque na primeira venda de kit — uma venda de kit gera **N movimentos** (um por componente) e **uma** linha de dinheiro.
+
+**`venda_item`** — o dinheiro de cada linha do relatório do ML.
+```
+id, numero_venda, sku_ref, produto_id (pode ser nulo), titulo,
+quantidade, devolvidas, abateu_estoque, cancelada, local_codigo,
+preco_unitario, receita_produtos, receita_envio, tarifa_venda,
+tarifa_envio, descontos, cancelamentos, total_liquido,
+custo_unitario, imposto_unitario,
+data_venda, lote_id, criado_em, atualizado_em
+```
+- **Chave**: (`numero_venda`, `sku_ref`) única. O `sku_ref` está na chave pelo mesmo motivo que `produto_id` está na chave do movimento: uma venda com vários produtos traz N linhas com o mesmo N.º de venda.
+- **`custo_unitario` e `imposto_unitario` são fotografia**, gravados na criação e nunca reescritos. Mudar o custo de um produto hoje não pode alterar o lucro de um mês já fechado. Para kit, o custo é a **soma dos componentes** (`kits.custo_montado`), porque é isso que sai da prateleira.
+- **Toda** linha do relatório é gravada, inclusive cancelada e sem produto casado: a receita existe de verdade, e escondê-la daria um lucro que não existe. O balanço conta quantas linhas estão sem custo e avisa na tela.
+- Ao contrário do movimento, esta linha **é atualizada** quando o mesmo N.º de venda volta em outro relatório. Relatórios se sobrepõem (§2.3), e a venda de ontem pode voltar hoje cancelada ou devolvida — o balanço precisa do número mais recente. Desfazer uma importação apaga as linhas que **aquele lote criou**.
+- As colunas 9 a 18 do relatório somam exatamente a coluna 19 (`Total (BRL)`) — conferido nas 51 linhas do arquivo real. É a checagem que denuncia leitura de coluna errada (§2.2).
+
+**`despesa`** — o que a loja gastou fora da mercadoria.
+```
+id, data, descricao (obrigatória), categoria, valor (> 0), observacao, criado_em
+```
+- **Compra de mercadoria não entra aqui.** Ela vira custo quando o produto é vendido (CMV). Se entrasse, o mês da reposição apareceria no prejuízo e o mês da venda com lucro irreal.
+- Descrição é obrigatória: *"R$ 300,00"* sem o quê não serve para nada três meses depois.
+- Despesa é digitada à mão, então **apagar é a correção certa** — diferente de movimento de estoque, que nunca some do histórico.
+
 ---
 
 ## 5. Fluxos principais
@@ -480,9 +507,22 @@ Formulário simples: produto, quantidade, custo unitário, fornecedor, data.
 Atualiza `custo_medio` por **média ponderada**.
 Depois de lançar, mostrar o efeito: *"Isso destravou 12 kits a mais."*
 
-### 5.5 Inventário (contagem física)
+### 5.5 Inventário e ajustes manuais (perda, quebra)
 
 Lista os produtos **simples** (kits não se contam), ela digita o que contou, o app gera os ajustes e mostra o resumo das diferenças. É o que traz o estoque de volta à realidade quando ele desanda.
+
+Junto vem o ajuste avulso, para o que sai sem venda. O **motivo não é enfeite**: ele decide o tipo do movimento, e o tipo decide se aquilo custa dinheiro no balanço.
+
+| Motivo | Tipo gravado | Efeito no estoque | Entra no balanço? |
+|---|---|---|---|
+| Quebrou ou estragou | `perda` | sai | **sim**, a custo |
+| Sumiu / não achei | `perda` | sai | **sim**, a custo |
+| Brinde ou uso próprio | `perda` | sai | **sim**, a custo |
+| Voltou danificado | `perda` | sai | **sim**, a custo |
+| Achei mais do que tinha | `ajuste` | entra | não |
+| Contei a prateleira | `inventario` | vai ao número exato | não |
+
+Perda é tipo próprio, e não `ajuste` genérico, exatamente para o balanço poder dizer *"R$ 84,00 perdidos em quebra este mês"*. A perda é valorizada pelo **custo atual** do produto — ela não passa por venda, então não existe fotografia de custo para ela.
 
 ### 5.6 Cadastro rápido
 
@@ -491,6 +531,35 @@ Formulário curto: nome, código, quantidade. Tudo o mais é opcional, recolhido
 ### 5.7 Envio para o Full (fase 2)
 
 Transferência `CASA` → `FULL`. Ver §2.5.
+
+### 5.8 Balanço do período (PNL)
+
+A tela responde **uma** pergunta — *sobrou dinheiro no mês?* — e a resposta aparece primeiro, em uma frase: *"Sobrou R$ 1.234,56 em agosto — margem de 21% sobre R$ 5.900,00 vendidos em 51 vendas."* A conta que leva até ela vem abaixo, na ordem de um DRE simples, para conferir de cima para baixo com o extrato do ML:
+
+```
+  Vendas de produtos                   col. 9 do relatório
++ Frete cobrado do comprador           col. 13
+± Descontos e bônus                    col. 10 + 17
+− Cancelamentos e reembolsos           col. 18
+− Tarifas do Mercado Livre             col. 12 + 11 (parcelamento)
+− Custos de envio                      col. 14 + 15 + 16
+─────────────────────────────────────
+= Recebido do Mercado Livre            col. 19 — bate exatamente
+− Custo dos produtos vendidos (CMV)    custo fotografado na venda
+− Impostos sobre as vendas             IMPOSTO do catálogo, por unidade
+− Perdas e quebras                     movimentos tipo `perda`, a custo
+− Despesas da loja                     tabela `despesa`
+─────────────────────────────────────
+= Lucro do período
+```
+
+Três decisões que sustentam isso:
+
+1. **O balanço é uma conta, nunca um saldo guardado.** É o mesmo princípio do estoque (§4.1): número guardado envelhece, conta refeita não mente. Três fontes independentes — vendas, despesas e perdas — recalculadas a cada abertura da tela.
+2. **A tarifa do ML já vem do relatório**, com o sinal dele. Não se digita comissão à mão: ela é o segundo maior custo da operação e erraria sempre.
+3. **Linha sem custo é sinalizada, não escondida.** Produto que vendeu sem custo cadastrado infla o lucro; a tela diz quantas linhas estão assim, e a coluna de margem mostra `sem custo` em vez de um número bonito e falso.
+
+Complementos da tela: lucro **por produto** (ordenado, para ver quem dá prejuízo) e exportação em CSV do período inteiro — demonstrativo, despesas e produtos — que é o arquivo que ela manda para o contador.
 
 ---
 
@@ -651,7 +720,7 @@ Prioridade nos testes que impedem perda de dados:
 1. **Invariante do livro-razão** — para qualquer sequência de operações, `soma(movimentos) == saldo`. O teste mais importante do projeto.
 2. **Disponibilidade de kit** — `min(saldo ÷ qtd)`; componente compartilhado entre kits; componente zerado zera todos os kits que dependem dele; quantidade > 1 por componente.
 3. **Explosão de kit na importação** — vender 2 kits que compartilham componente baixa a soma correta; venda mista (kit + avulso do mesmo componente) na mesma importação.
-4. **Idempotência** — importar o mesmo arquivo 2× produz exatamente os mesmos saldos, **incluindo vendas de kit** (que geram vários movimentos com a mesma referência — o caso mais fácil de quebrar).
+4. **Idempotência** — importar o mesmo arquivo 2× produz exatamente os mesmos saldos, **incluindo vendas de kit** (que geram vários movimentos com a mesma referência — o caso mais fácil de quebrar). Vale também para o dinheiro: o balanço não pode dobrar na reimportação.
 5. **Parser do ML** — fixtures com XLSX reais anonimizados: normal, com devolução, com cancelamento, com SKU vazio, com venda Full, coluna faltando, arquivo errado (relatório de tarifas).
 6. **Desfazer lote** — restaura o estado exato anterior, componentes incluídos.
 7. **Composição inválida** — ciclo, kit dentro de kit, quantidade zero → todos recusados.
@@ -691,7 +760,7 @@ Ferramentas: `pytest`, `ruff`, `mypy` no `core/`. CI em cada PR.
 
 ### Fase 3 — Fechar o ciclo
 - [ ] **API oficial do Mercado Livre — atualizar o estoque dos anúncios afetados** (§5.2). É o objetivo final: hoje o ML não sabe que vender um kit reduz o avulso.
-- [ ] Margem por produto (preço − custo − tarifas do relatório)
+- [x] Margem por produto (preço − custo − tarifas do relatório) — entregue na §5.8
 - [ ] Mais vendidos / curva ABC / giro
 - [ ] Previsão de ruptura ("acaba em ~6 dias")
 - [ ] Etiquetas de código de barras

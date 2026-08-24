@@ -23,6 +23,22 @@ VERMELHO = "#b3261e"
 LIMITE_TITULO = 36
 
 
+def moeda(valor: float) -> str:
+    """R$ 1.234,56 — ponto no milhar, vírgula no centavo, sinal antes do símbolo.
+
+    Existe porque `f"R$ {v:.2f}"` escreve 1234.56, que ela lê como mil duzentos
+    e trinta e quatro reais e cinquenta e seis... ou não lê.
+    """
+    sinal = "-" if round(valor, 2) < 0 else ""
+    inteiro = f"{abs(valor):,.2f}".replace(",", "@").replace(".", ",").replace("@", ".")
+    return f"{sinal}R$ {inteiro}"
+
+
+def numero(valor: float, casas: int = 1) -> str:
+    """Número com vírgula decimal — usado nas margens."""
+    return f"{valor:.{casas}f}".replace(".", ",")
+
+
 def titulo(texto: str, limite: int = LIMITE_TITULO) -> QLabel:
     """Título encurtado, com o texto inteiro no tooltip.
 

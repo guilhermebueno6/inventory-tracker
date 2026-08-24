@@ -20,10 +20,17 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import kits, ledger, repo
-from ..services import backup, importacao
+from ..services import backup, financeiro, importacao
 from ..version import APP_NAME, __version__
 from .atualizacao import DialogoAtualizacao, VerificadorDeVersao
-from .dialogos import DialogoEntrada, DialogoImportacoes
+from .dialogos import (
+    DialogoAjuste,
+    DialogoDespesa,
+    DialogoDespesas,
+    DialogoEntrada,
+    DialogoImportacoes,
+)
+from .tela_balanco import TelaBalanco
 from .tela_estoque import TelaEstoque
 from .tela_importacao import TelaImportacao, escolher_arquivo
 from .tela_kits import TelaKitsPendentes
@@ -34,6 +41,7 @@ from .widgets.comuns import (
     dica,
     faixa,
     informar,
+    moeda,
     subtitulo,
     titulo,
 )
@@ -66,12 +74,17 @@ class TelaInicial(QWidget):
         self.faixa_alerta = faixa("")
         self.lay.addWidget(self.faixa_alerta)
 
+        self.lb_mes = dica("")
+        self.lay.addWidget(self.lb_mes)
+
         grade = QGridLayout()
         grade.setSpacing(16)
         botoes = [
             ("Ver estoque", "o que tem e o que está acabando", janela.abrir_estoque),
             ("Importar vendas", "baixar o relatório do Mercado Livre", janela.importar_vendas),
             ("Entrada de mercadoria", "registrar o que chegou", janela.abrir_entrada),
+            ("Lançar despesa", "o que você gastou com a loja", janela.lancar_despesa),
+            ("Balanço", "quanto sobrou no mês", janela.abrir_balanco),
             ("Backup", "guardar uma cópia dos seus dados", janela.fazer_backup),
         ]
         for i, (texto, desc, acao) in enumerate(botoes):
@@ -87,6 +100,22 @@ class TelaInicial(QWidget):
         self.lay.addStretch(1)
         self.lay.addWidget(dica(f"Versão {__version__}"))
         self.recarregar()
+
+    def _mostrar_mes(self, session) -> None:
+        """Uma linha com o resultado do mês. Nunca bloqueia a tela se falhar."""
+        try:
+            b = financeiro.resumo_do_mes(session)
+        except Exception:  # noqa: BLE001
+            self.lb_mes.setText("")
+            return
+        if not b.tem_dados:
+            self.lb_mes.setText("")
+            return
+        verbo = "sobraram" if b.lucro >= 0 else "faltaram"
+        self.lb_mes.setText(
+            f"Este mês: {b.vendas} venda(s) e {verbo} {moeda(abs(b.lucro))} "
+            f"(margem {b.margem:.0f}%). Veja em Balanço."
+        )
 
     def mostrar_atualizacao(self, atualizacao) -> None:
         self.lb_atualizacao.setText(
@@ -122,6 +151,7 @@ class TelaInicial(QWidget):
             texto, tipo = ("Tudo em ordem. Nenhum item abaixo do mínimo.", "ok")
 
         self.faixa_alerta.atualizar(texto, tipo)
+        self._mostrar_mes(session)
         self.bt_kits.setVisible(bool(pendentes))
         if pendentes:
             self.bt_kits.setText(f"Configurar os {len(pendentes)} kits que faltam")
@@ -141,9 +171,11 @@ class JanelaPrincipal(QMainWindow):
         self.inicial = TelaInicial(self)
         self.estoque = TelaEstoque(session)
         self.kits_pendentes = TelaKitsPendentes(session)
+        self.balanco = TelaBalanco(session)
 
         for tela in (self.inicial, self._com_voltar(self.estoque),
-                     self._com_voltar(self.kits_pendentes)):
+                     self._com_voltar(self.kits_pendentes),
+                     self._com_voltar(self.balanco)):
             self.pilha.addWidget(tela)
 
         self._menu()
@@ -180,7 +212,13 @@ class JanelaPrincipal(QMainWindow):
         vendas.addAction("Importar vendas…", self.importar_vendas)
         vendas.addAction("Ver importações / desfazer…", self.abrir_importacoes)
 
+        dinheiro = self.menuBar().addMenu("Dinheiro")
+        dinheiro.addAction("Balanço do período…", self.abrir_balanco)
+        dinheiro.addAction("Lançar despesa…", self.lancar_despesa)
+        dinheiro.addAction("Ver despesas…", self.abrir_despesas)
+
         ferramentas = self.menuBar().addMenu("Ferramentas")
+        ferramentas.addAction("Ajuste de estoque (perda, quebra)…", self.abrir_ajuste)
         ferramentas.addAction("Conferir estoque (recalcular)", self.recalcular)
 
         ajuda = self.menuBar().addMenu("Ajuda")
@@ -201,6 +239,10 @@ class JanelaPrincipal(QMainWindow):
         self.kits_pendentes.recarregar()
         self.pilha.setCurrentIndex(2)
 
+    def abrir_balanco(self):
+        self.balanco.recarregar()
+        self.pilha.setCurrentIndex(3)
+
     # --------------------------------------------------------------- ações
 
     def abrir_entrada(self):
@@ -211,6 +253,25 @@ class JanelaPrincipal(QMainWindow):
         DialogoEntrada(self.session, self).exec()
         self.inicial.recarregar()
         self.estoque.recarregar()
+
+    def abrir_ajuste(self):
+        if repo.contar(self.session)["simples"] == 0:
+            informar(self, "Sem produtos ainda",
+                     "Importe seu catálogo primeiro, em Arquivo → Importar catálogo.")
+            return
+        DialogoAjuste(self.session, None, self).exec()
+        self.inicial.recarregar()
+        self.estoque.recarregar()
+
+    def lancar_despesa(self):
+        if DialogoDespesa(self.session, self).exec():
+            self.balanco.recarregar()
+            self.inicial.recarregar()
+
+    def abrir_despesas(self):
+        DialogoDespesas(self.session, pai=self).exec()
+        self.balanco.recarregar()
+        self.inicial.recarregar()
 
     def abrir_importacoes(self):
         DialogoImportacoes(self.session, self).exec()
@@ -230,15 +291,23 @@ class JanelaPrincipal(QMainWindow):
         tela = tela_exec
         if aplicou and tela.resumo_final:
             r = tela.resumo_final
+            extra = ""
+            if r.linhas_corrigidas:
+                extra = (
+                    f"\n{r.linhas_corrigidas} venda(s) que já estavam aqui foram "
+                    "atualizadas (cancelamento ou devolução no relatório novo)."
+                )
             informar(
                 self, "Baixa concluída",
                 f"{r.vendas_aplicadas} vendas lançadas, {r.movimentos} movimentos "
-                f"de estoque.\n\nSe algo saiu errado, use Vendas → Ver importações "
+                f"de estoque.\n{r.linhas_financeiras} linha(s) entraram no balanço."
+                f"{extra}\n\nSe algo saiu errado, use Vendas → Ver importações "
                 "para desfazer.",
             )
         self.inicial.recarregar()
         self.estoque.recarregar()
         self.kits_pendentes.recarregar()
+        self.balanco.recarregar()
 
     def importar_catalogo(self):
         caminho, _ = QFileDialog.getOpenFileName(

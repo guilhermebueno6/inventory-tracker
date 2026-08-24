@@ -69,6 +69,10 @@ class TelaEstoque(QWidget):
         self.bt_reativar.clicked.connect(self.reativar_selecionado)
         self.bt_reativar.setVisible(False)
 
+        bt_ajuste = QPushButton("Perda / ajuste")
+        bt_ajuste.setToolTip("Quebrou, sumiu, virou brinde — ou contagem da prateleira")
+        bt_ajuste.clicked.connect(self.ajustar_estoque)
+
         bt_novo = QPushButton("Novo produto")
         bt_novo.setObjectName("primario")
         bt_novo.clicked.connect(self.novo_produto)
@@ -77,6 +81,7 @@ class TelaEstoque(QWidget):
         topo.addWidget(self.filtro)
         topo.addWidget(self.bt_reativar)
         topo.addWidget(self.bt_excluir)
+        topo.addWidget(bt_ajuste)
         topo.addWidget(bt_novo)
         lay.addLayout(topo)
 
@@ -231,4 +236,10 @@ class TelaEstoque(QWidget):
         if p is None or p.ativo:
             return
         if reativar_produto(self, self.session, p):
+    def ajustar_estoque(self):
+        """Já abre no produto selecionado, se houver um."""
+        from .dialogos import DialogoAjuste
+
+        selecionado = self.produto_selecionado()
+        if DialogoAjuste(self.session, selecionado, self).exec():
             self.recarregar()

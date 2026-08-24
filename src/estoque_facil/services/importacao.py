@@ -17,7 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core import ledger, repo
-from ..core.kits import ErroComposicao, disponivel, explodir
+from ..core.kits import ErroComposicao, custo_montado, disponivel, explodir
 from ..core.models import (
     FULL,
     LoteImportacao,
@@ -27,6 +27,8 @@ from ..core.models import (
     StatusLote,
     TipoMovimento,
     TipoProduto,
+    VendaItem,
+    normalizar_sku,
 )
 from ..importers import catalogo_csv, ml_vendas_xlsx
 from ..importers.ml_vendas_xlsx import LinhaVenda, RelatorioML
@@ -207,6 +209,72 @@ class ResumoImportacao:
     vendas_aplicadas: int
     ignoradas: int
     pendentes: int
+    linhas_financeiras: int = 0     # linhas novas gravadas para o balanço
+    linhas_corrigidas: int = 0      # linhas que já existiam e mudaram de valor
+
+
+def _chave_financeira(lv: LinhaVenda) -> str:
+    """Identifica a linha dentro da venda. Uma venda pode ter vários produtos."""
+    return normalizar_sku(lv.sku or lv.mlb or lv.titulo)[:200]
+
+
+def _gravar_financeiro(session: Session, linha: LinhaAnalise, lote_id: int) -> str:
+    """Guarda o DINHEIRO da linha — o estoque já foi tratado em outro lugar.
+
+    Grava TODAS as linhas do relatório, inclusive canceladas e sem cadastro:
+    receita cancelada some do balanço pelos próprios números do ML, e receita de
+    produto não cadastrado existe de verdade — escondê-la daria um lucro errado.
+
+    Quando a linha já existe, ATUALIZA em vez de ignorar. Relatórios se sobrepõem
+    (§2.3): a venda de ontem que aparecia como "pronta para enviar" pode voltar
+    hoje cancelada ou com devolução, e o balanço precisa do número mais recente.
+    """
+    lv = linha.origem
+    produto = linha.produto
+    chave = _chave_financeira(lv)
+    if not lv.numero_venda or not chave:
+        return "ignorado"
+
+    item = session.scalar(
+        select(VendaItem).where(
+            VendaItem.numero_venda == lv.numero_venda, VendaItem.sku_ref == chave
+        )
+    )
+    novo = item is None
+    if novo:
+        item = VendaItem(numero_venda=lv.numero_venda, sku_ref=chave, lote_id=lote_id)
+        session.add(item)
+
+    antes = (item.total_liquido, item.quantidade, item.devolvidas)
+
+    item.produto_id = produto.id if produto else item.produto_id
+    item.titulo = lv.titulo or (produto.rotulo if produto else "")
+    item.quantidade = lv.quantidade
+    item.devolvidas = lv.devolvidas
+    item.abateu_estoque = bool(linha.baixas)
+    item.cancelada = lv.cancelada or not lv.abate
+    item.local_codigo = lv.local
+    item.preco_unitario = lv.preco_unitario
+    item.receita_produtos = lv.receita_produtos
+    item.receita_envio = lv.receita_envio
+    item.tarifa_venda = lv.tarifa_venda
+    item.tarifa_envio = lv.tarifa_envio
+    item.descontos = lv.descontos
+    item.cancelamentos = lv.cancelamentos
+    item.total_liquido = lv.total
+    item.data_venda = lv.data
+
+    # Fotografia do custo: só na criação. Reimportar um relatório antigo não pode
+    # reescrever o custo de uma venda com o preço de compra de hoje.
+    if novo and produto is not None:
+        item.custo_unitario = custo_montado(session, produto)
+        item.imposto_unitario = round(produto.imposto or 0.0, 4)
+
+    session.flush()
+    if novo:
+        return "novo"
+    return "atualizado" if antes != (item.total_liquido, item.quantidade, item.devolvidas) \
+        else "igual"
 
 
 def confirmar_vendas(session: Session, analise: AnaliseVendas) -> ResumoImportacao:
@@ -254,6 +322,13 @@ def confirmar_vendas(session: Session, analise: AnaliseVendas) -> ResumoImportac
                 local_codigo=lv.local, lote_id=lote.id, data_evento=lv.data,
             )
 
+    # O dinheiro de TODAS as linhas, na mesma transação do estoque (§5.8)
+    novas = corrigidas = 0
+    for linha in analise.linhas:
+        resultado = _gravar_financeiro(session, linha, lote.id)
+        novas += resultado == "novo"
+        corrigidas += resultado == "atualizado"
+
     from datetime import datetime
 
     lote.confirmado_em = datetime.now()
@@ -264,6 +339,8 @@ def confirmar_vendas(session: Session, analise: AnaliseVendas) -> ResumoImportac
         vendas_aplicadas=aplicadas,
         ignoradas=ignoradas,
         pendentes=len(analise.por(Situacao.SEM_CADASTRO)),
+        linhas_financeiras=novas,
+        linhas_corrigidas=corrigidas,
     )
 
 

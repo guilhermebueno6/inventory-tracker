@@ -134,3 +134,41 @@ def test_os_dados_ficam_fora_da_pasta_do_programa():
     pasta = db.pasta_dados()
     programa = str(Path(sys.argv[0]).resolve().parent) if sys.argv[0] else ""
     assert programa not in str(pasta) or not programa
+
+
+def _tabelas(engine) -> set[str]:
+    from sqlalchemy import inspect
+
+    return set(inspect(engine).get_table_names())
+
+
+def test_banco_da_versao_anterior_ganha_as_tabelas_do_dinheiro(session):
+    """Quem já usa o app hoje precisa receber balanço e despesas sem perder nada."""
+    from datetime import datetime
+
+    from estoque_facil.services import financeiro
+
+    produto = _dados_de_exemplo(session)
+    engine = session.get_bind()
+
+    # volta para a revisão publicada antes do balanço existir
+    with db.sem_chaves_estrangeiras(engine):
+        command.downgrade(migracoes._config(engine), "0002")
+    assert "venda_item" not in _tabelas(engine)
+    assert "despesa" not in _tabelas(engine)
+
+    resultado = migracoes.garantir_atualizado(engine, db.caminho_banco())
+
+    assert "migrado" in resultado
+    assert {"venda_item", "despesa"} <= _tabelas(engine)
+
+    # o estoque atravessou a migração...
+    session.expire_all()
+    assert ledger.saldo_de(session, repo.por_sku(session, produto.sku)) == 42
+    assert ledger.verificar_invariante(session) == []
+
+    # ...e o financeiro já funciona no banco migrado
+    financeiro.registrar_despesa(session, "Caixas", 100, data=datetime(2026, 8, 2))
+    session.commit()
+    balanco = financeiro.apurar(session, datetime(2026, 8, 1), datetime(2026, 8, 31))
+    assert balanco.despesas == 100
