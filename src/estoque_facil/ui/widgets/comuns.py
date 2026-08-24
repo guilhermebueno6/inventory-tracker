@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import re
+
 from PySide6.QtCore import QLocale, QRectF, Qt, Signal
-from PySide6.QtGui import QValidator, QColor, QFontMetrics, QPainter
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QValidator
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFrame,
