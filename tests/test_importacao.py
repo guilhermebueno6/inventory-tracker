@@ -116,6 +116,22 @@ def test_kits_sem_composicao_ficam_pendentes_e_nao_travam_o_resto(catalogo_real,
     assert a.aplicaveis, "as vendas de itens simples passam normalmente"
 
 
+def test_venda_de_produto_arquivado_baixa_mas_avisa(catalogo_real, session):
+    """Arquivar não pode virar um buraco silencioso no estoque."""
+    from estoque_facil.core import exclusao
+
+    vendido = repo.por_sku(session, "mord.mao.azul")
+    exclusao.arquivar(session, vendido)
+    session.commit()
+
+    a = importacao.analisar_vendas(session, VENDAS)
+    linhas = [ln for ln in a.linhas if ln.produto is vendido]
+    assert linhas, "fixture precisa ter venda deste SKU"
+    assert all(ln.situacao is Situacao.ATENCAO for ln in linhas)
+    assert all("arquivado" in ln.motivo for ln in linhas)
+    assert linhas[0] in a.aplicaveis, "a venda é real: continua sendo baixada"
+
+
 def test_importacao_completa_com_composicoes(catalogo_real, session):
     # define a composição do kit mais vendido (25% das vendas)
     kit = repo.por_sku(session, "KIT.MAOPE.ROSA")

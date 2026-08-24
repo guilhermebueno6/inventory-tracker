@@ -95,10 +95,18 @@ def buscar(
 
 
 def contar(session: Session) -> dict[str, int]:
-    total = session.scalar(select(func.count()).select_from(Produto)) or 0
+    """Só o catálogo vivo. Arquivado não entra em contador nem em alerta."""
+    total = (
+        session.scalar(
+            select(func.count()).select_from(Produto).where(Produto.ativo.is_(True))
+        )
+        or 0
+    )
     kits = (
         session.scalar(
-            select(func.count()).select_from(Produto).where(Produto.tipo == TipoProduto.KIT)
+            select(func.count())
+            .select_from(Produto)
+            .where(Produto.ativo.is_(True), Produto.tipo == TipoProduto.KIT)
         )
         or 0
     )

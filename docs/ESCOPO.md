@@ -448,7 +448,45 @@ Um item comprado destrava vários anúncios. É a informação de compra mais va
 - Mudar a composição **não** altera movimentos passados — o histórico registra o que saiu de fato.
 - Um produto simples continua vendável sozinho, sem nada especial.
 
-### 5.2.6 ⚠️ Consequência: o estoque dos anúncios no ML fica errado
+### 5.2.6 Tirar um produto do catálogo — arquivar × excluir
+
+O catálogo inicial vem do Mercado Livre e traz anúncios que ela já não vende. Precisa dar
+para limpar a lista — sem que limpar a lista signifique reescrever o passado.
+
+São **duas operações**, e o app escolhe qual cabe (a usuária nunca precisa saber a
+diferença: ela clica em *Excluir* e o app pergunta uma coisa só):
+
+| | Quando | O que acontece |
+|---|---|---|
+| **Excluir de vez** | O produto nunca foi movimentado | A linha some do banco, junto com a composição, se for kit. Sem volta. |
+| **Arquivar** | O produto tem histórico | Some das listas, buscas, contadores e alertas. Movimentos e saldo ficam intactos. Reversível. |
+
+**Por que não apagar sempre.** O §4.1 diz que estoque é a soma dos movimentos. Apagar um
+produto com histórico deixaria vendas antigas sem o item que saiu — o número pararia de
+bater com a realidade e o *Conferir estoque* passaria a acusar diferença para sempre.
+Nas chaves estrangeiras do banco isso é literal: nem `movimento.produto_id` nem
+`venda_item.produto_id` têm cascata, então o SQLite recusaria. O app recusa antes, em
+português.
+
+**"Histórico" são as duas tabelas.** `movimento` (quantidade) e `venda_item` (dinheiro,
+§4.4) contam juntos. Não é detalhe: uma venda **cancelada** grava a linha de dinheiro e
+**nenhum** movimento de estoque. Olhar só para `movimento` deixaria esse produto passar
+como "nunca movimentado" e o `DELETE` morreria na chave estrangeira — erro técnico na
+cara da usuária, sem explicação e sem saída.
+
+**Componente usado em kit não sai** — nem excluído, nem arquivado. A mensagem nomeia os
+kits que quebrariam e manda removê-lo dessas composições primeiro (é a regra do §5.2.5
+levada ao pé da letra). Kits arquivados aparecem marcados na mensagem, senão ela mandaria
+procurar um kit que sumiu das listas.
+
+**Arquivado que vende de novo.** A importação continua baixando o estoque — a venda é
+real —, mas a linha entra como 🟡 *Atenção* dizendo que o produto está arquivado. Sem isso,
+arquivar viraria um buraco silencioso no estoque.
+
+O filtro *Arquivados* na tela de estoque lista os arquivados e traz qualquer um de volta,
+com o estoque e o histórico que ele já tinha.
+
+### 5.2.7 ⚠️ Consequência: o estoque dos anúncios no ML fica errado
 
 Com componentes compartilhados, vender 1 `KIT.MAOPE.ROSA` reduz a disponibilidade do anúncio do mordedor avulso — **e o ML não sabe disso**. Risco real de vender o que não existe.
 

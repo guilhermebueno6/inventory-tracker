@@ -6,7 +6,7 @@ tem o campo de estoque bloqueado.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -18,14 +18,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..core import kits, repo
-from ..core.models import TipoProduto
+from ..core import exclusao, kits, repo
+from ..core.models import Produto, TipoProduto
+from .dialogos import excluir_produto, reativar_produto
 from .tela_produto import TelaProduto
 from .widgets.comuns import celula, configurar_colunas, dica, titulo
 
 COR_ALERTA = QColor("#b3261e")
 COR_ATENCAO = QColor("#8a5300")
 COR_KIT = QColor("#2f4f8f")
+COR_ARQUIVADO = QColor("#6b6b6b")
+
+FILTRO_ARQUIVADOS = "Arquivados"
 
 
 class TelaEstoque(QWidget):
@@ -52,8 +56,18 @@ class TelaEstoque(QWidget):
         self.busca.textChanged.connect(lambda _: self._timer.start())
 
         self.filtro = QComboBox()
-        self.filtro.addItems(["Tudo", "Só itens", "Só kits", "Precisa comprar"])
+        self.filtro.addItems(
+            ["Tudo", "Só itens", "Só kits", "Precisa comprar", FILTRO_ARQUIVADOS]
+        )
         self.filtro.currentIndexChanged.connect(self.recarregar)
+
+        self.bt_excluir = QPushButton("Excluir")
+        self.bt_excluir.setObjectName("perigo")
+        self.bt_excluir.clicked.connect(self.excluir_selecionado)
+
+        self.bt_reativar = QPushButton("Trazer de volta")
+        self.bt_reativar.clicked.connect(self.reativar_selecionado)
+        self.bt_reativar.setVisible(False)
 
         bt_ajuste = QPushButton("Perda / ajuste")
         bt_ajuste.setToolTip("Quebrou, sumiu, virou brinde — ou contagem da prateleira")
@@ -65,6 +79,8 @@ class TelaEstoque(QWidget):
 
         topo.addWidget(self.busca, 1)
         topo.addWidget(self.filtro)
+        topo.addWidget(self.bt_reativar)
+        topo.addWidget(self.bt_excluir)
         topo.addWidget(bt_ajuste)
         topo.addWidget(bt_novo)
         lay.addLayout(topo)
@@ -82,11 +98,19 @@ class TelaEstoque(QWidget):
         self.tabela.doubleClicked.connect(self.abrir_selecionado)
         lay.addWidget(self.tabela, 1)
 
+        # Delete é o gesto que todo mundo tenta primeiro numa lista.
+        atalho = QShortcut(QKeySequence.Delete, self.tabela)
+        atalho.activated.connect(self.excluir_selecionado)
+
         self.rodape = dica("")
         lay.addWidget(self.rodape)
         self.recarregar()
 
     # ------------------------------------------------------------------ dados
+
+    @property
+    def _vendo_arquivados(self) -> bool:
+        return self.filtro.currentText() == FILTRO_ARQUIVADOS
 
     def _produtos(self):
         texto = self.busca.text()
@@ -97,9 +121,15 @@ class TelaEstoque(QWidget):
             return repo.buscar(self.session, texto, tipo=TipoProduto.KIT)
         if modo == "Precisa comprar":
             return [p for p, _, _ in repo.abaixo_do_minimo(self.session)]
+        if modo == FILTRO_ARQUIVADOS:
+            return exclusao.arquivados(self.session, texto)
         return repo.buscar(self.session, texto)
 
     def recarregar(self):
+        arquivados = self._vendo_arquivados
+        self.bt_reativar.setVisible(arquivados)
+        self.bt_excluir.setText("Excluir de vez" if arquivados else "Excluir")
+
         produtos = self._produtos()
         self.tabela.setRowCount(0)
         alertas = 0
@@ -122,7 +152,13 @@ class TelaEstoque(QWidget):
             item_qtd.setTextAlignment(Qt.AlignCenter)
 
             obs = ""
-            if p.eh_kit and not kits.componentes_de(self.session, p):
+            if not p.ativo:
+                # Arquivado não gera alerta: ele saiu do dia a dia de propósito.
+                obs = "Arquivado — fora das listas"
+                for coluna in (0, 1, 2):
+                    self.tabela.item(linha, coluna).setForeground(QBrush(COR_ARQUIVADO))
+                item_qtd.setForeground(QBrush(COR_ARQUIVADO))
+            elif p.eh_kit and not kits.componentes_de(self.session, p):
                 obs = "Sem composição"
                 item_qtd.setForeground(QBrush(COR_ALERTA))
                 alertas += 1
@@ -145,6 +181,18 @@ class TelaEstoque(QWidget):
             self.tabela.setItem(linha, 4, celula(obs))
             self.tabela.item(linha, 0).setData(Qt.UserRole, p.id)
 
+        if arquivados:
+            n = len(produtos)
+            self.rodape.setText(
+                "Nenhum produto arquivado." if not n
+                else (
+                    f"{n} produto{'s' if n > 1 else ''} arquivado"
+                    f"{'s' if n > 1 else ''}. Não aparecem nas buscas nem nos "
+                    "alertas, e o histórico de cada um continua guardado."
+                )
+            )
+            return
+
         contagem = repo.contar(self.session)
         self.rodape.setText(
             f"Mostrando {len(produtos)} de {contagem['total']} produtos "
@@ -163,8 +211,6 @@ class TelaEstoque(QWidget):
         if linha < 0:
             return None
         pid = self.tabela.item(linha, 0).data(Qt.UserRole)
-        from ..core.models import Produto
-
         return self.session.get(Produto, pid)
 
     def abrir_selecionado(self):
@@ -176,6 +222,20 @@ class TelaEstoque(QWidget):
 
     def novo_produto(self):
         if TelaProduto(self.session, None, self).exec():
+            self.recarregar()
+
+    def excluir_selecionado(self):
+        p = self.produto_selecionado()
+        if p is None:
+            return
+        if excluir_produto(self, self.session, p):
+            self.recarregar()
+
+    def reativar_selecionado(self):
+        p = self.produto_selecionado()
+        if p is None or p.ativo:
+            return
+        if reativar_produto(self, self.session, p):
             self.recarregar()
 
     def ajustar_estoque(self):

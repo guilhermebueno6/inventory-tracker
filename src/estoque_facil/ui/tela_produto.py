@@ -35,6 +35,7 @@ from ..core import kits, ledger, repo
 from ..core.kits import ErroComposicao
 from ..core.models import TipoMovimento, TipoProduto
 from ..services import sugestao
+from .dialogos import excluir_produto
 from .widgets.comuns import (
     avisar,
     confirmar,
@@ -382,6 +383,12 @@ class TelaProduto(QDialog):
         barra.setObjectName("rodape")
         rodape = QHBoxLayout(barra)
         rodape.setContentsMargins(24, 12, 24, 12)
+        if not self.novo:
+            # Longe do Salvar, no canto oposto: é a ação que não se clica sem querer.
+            self.bt_excluir = QPushButton("Excluir")
+            self.bt_excluir.setObjectName("perigo")
+            self.bt_excluir.clicked.connect(self._excluir)
+            rodape.addWidget(self.bt_excluir)
         rodape.addStretch(1)
         bt_cancelar = QPushButton("Cancelar")
         bt_cancelar.clicked.connect(self.reject)
@@ -449,6 +456,13 @@ class TelaProduto(QDialog):
             self.f_custo.setToolTip(
                 "O custo do kit é usado para conferir se a composição está completa."
             )
+
+    # -------------------------------------------------------------- excluir
+
+    def _excluir(self):
+        """Sai pelo `accept()` para a lista de trás recarregar — o produto mudou."""
+        if excluir_produto(self, self.session, self.produto):
+            self.accept()
 
     # --------------------------------------------------------------- salvar
 
