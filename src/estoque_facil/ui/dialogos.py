@@ -1,13 +1,17 @@
-"""Diálogos curtos: entrada de mercadoria e desfazer importação."""
+"""Diálogos curtos: entrada de mercadoria, ajuste de estoque, despesas e desfazer."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from datetime import datetime
+
+from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QDateEdit,
     QDialog,
     QDoubleSpinBox,
     QFormLayout,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QSpinBox,
@@ -18,7 +22,15 @@ from PySide6.QtWidgets import (
 from sqlalchemy import select
 
 from ..core import kits, ledger, repo
-from ..core.models import LoteImportacao, StatusLote, TipoProduto
+from ..core.models import (
+    ROTULOS_DESPESA,
+    CategoriaDespesa,
+    LoteImportacao,
+    Produto,
+    StatusLote,
+    TipoProduto,
+)
+from ..services import financeiro
 from .widgets.comuns import (
     avisar,
     celula,
@@ -26,8 +38,24 @@ from .widgets.comuns import (
     confirmar,
     dica,
     informar,
+    moeda,
     titulo,
 )
+
+
+def campo_data(valor: datetime | None = None) -> QDateEdit:
+    """Data com calendário. Padrão é hoje — quase sempre é o que ela quer."""
+    campo = QDateEdit()
+    campo.setCalendarPopup(True)
+    campo.setDisplayFormat("dd/MM/yyyy")
+    d = valor or datetime.now()
+    campo.setDate(QDate(d.year, d.month, d.day))
+    return campo
+
+
+def data_de(campo: QDateEdit) -> datetime:
+    d = campo.date()
+    return datetime(d.year(), d.month(), d.day())
 
 
 class DialogoEntrada(QDialog):
@@ -188,8 +216,8 @@ class DialogoImportacoes(QDialog):
             "Desfazer importação",
             f"Vou desfazer a importação de {lote.arquivo_nome} "
             f"({lote.linhas_novas} vendas).\n\n"
-            "O estoque volta ao que era antes dela. "
-            "Depois disso você pode importar o arquivo de novo.",
+            "O estoque volta ao que era antes dela, e essas vendas saem do "
+            "balanço. Depois disso você pode importar o arquivo de novo.",
             "Desfazer",
         ):
             return
@@ -201,4 +229,316 @@ class DialogoImportacoes(QDialog):
             avisar(self, "Não consegui desfazer", str(exc))
             return
         informar(self, "Desfeito", f"{qtd} movimentos removidos. O estoque foi restaurado.")
+        self.recarregar()
+
+
+class DialogoAjuste(QDialog):
+    """Ajuste manual de estoque: perda, quebra, brinde ou contagem — §5.5.
+
+    O motivo não é enfeite: perda tem custo e entra no balanço, contagem não.
+    """
+
+    def __init__(self, session, produto=None, pai=None):
+        super().__init__(pai)
+        self.session = session
+        self.setWindowTitle("Ajuste de estoque")
+        self.setMinimumWidth(620)
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(12)
+        lay.addWidget(titulo("Ajuste de estoque"))
+        lay.addWidget(dica(
+            "Use aqui o que saiu sem venda: quebrou, sumiu, virou brinde — "
+            "ou o resultado de uma contagem na prateleira."
+        ))
+
+        form = QFormLayout()
+        self.combo = QComboBox()
+        self.combo.setEditable(True)
+        self.combo.setInsertPolicy(QComboBox.NoInsert)
+        for p in repo.buscar(session, tipo=TipoProduto.SIMPLES):
+            self.combo.addItem(f"{p.rotulo}  ({p.sku})", p.id)
+        if produto is not None and not produto.eh_kit:
+            indice = self.combo.findData(produto.id)
+            if indice >= 0:
+                self.combo.setCurrentIndex(indice)
+        # nome de anúncio é longo: sem isto o campo abre mostrando o FIM do texto
+        # ("…cartável Médio (m)"), e ela não reconhece o produto (mesmo motivo do
+        # setCursorPosition(0) da tela do produto)
+        self.combo.lineEdit().setCursorPosition(0)
+        self.combo.currentIndexChanged.connect(self._atualizar_saldo)
+
+        self.motivo = QComboBox()
+        for codigo, (rotulo, _tipo, _modo) in ledger.MOTIVOS_AJUSTE.items():
+            self.motivo.addItem(rotulo, codigo)
+        self.motivo.currentIndexChanged.connect(self._atualizar_saldo)
+
+        self.qtd = QSpinBox()
+        self.qtd.setRange(0, 999999)
+        self.qtd.setValue(1)
+
+        self.descricao = QLineEdit()
+        self.descricao.setPlaceholderText("o que aconteceu (opcional, mas ajuda depois)")
+
+        form.addRow("Produto", self.combo)
+        form.addRow("O que aconteceu", self.motivo)
+        form.addRow("Quantidade", self.qtd)
+        form.addRow("Detalhe", self.descricao)
+        lay.addLayout(form)
+
+        self.lb_efeito = QLabel("")
+        self.lb_efeito.setWordWrap(True)
+        lay.addWidget(self.lb_efeito)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        bt_cancelar = QPushButton("Cancelar")
+        bt_cancelar.clicked.connect(self.reject)
+        bt_ok = QPushButton("Registrar ajuste")
+        bt_ok.setObjectName("primario")
+        bt_ok.clicked.connect(self._salvar)
+        rodape.addWidget(bt_cancelar)
+        rodape.addWidget(bt_ok)
+        lay.addLayout(rodape)
+
+        self._atualizar_saldo()
+
+    def _produto(self):
+        pid = self.combo.currentData()
+        return self.session.get(Produto, pid) if pid is not None else None
+
+    def _atualizar_saldo(self):
+        produto = self._produto()
+        if produto is None:
+            self.lb_efeito.setText("")
+            return
+        saldo = ledger.saldo_de(self.session, produto)
+        _rotulo, _tipo, modo = ledger.MOTIVOS_AJUSTE[self.motivo.currentData()]
+        self.qtd.setPrefix("")
+        if modo == "exato":
+            self.qtd.setValue(saldo)
+            self.lb_efeito.setText(
+                f"{produto.rotulo} está com {saldo} no sistema. "
+                "Digite quanto tem de verdade na prateleira."
+            )
+        elif modo == "entrada":
+            self.lb_efeito.setText(f"{produto.rotulo} tem {saldo} — as unidades entram.")
+        else:
+            custo = (produto.custo or 0.0) * self.qtd.value()
+            self.lb_efeito.setText(
+                f"{produto.rotulo} tem {saldo} — as unidades saem do estoque"
+                + (f" e entram no balanço como perda de {moeda(custo)}." if custo else ".")
+            )
+
+    def _salvar(self):
+        produto = self._produto()
+        if produto is None:
+            avisar(self, "Escolha o produto", "Preciso saber qual produto ajustar.")
+            return
+        try:
+            mov = ledger.ajuste_manual(
+                self.session, produto, self.motivo.currentData(), self.qtd.value(),
+                descricao=self.descricao.text(),
+            )
+            self.session.commit()
+        except ledger.ErroEstoque as exc:
+            self.session.rollback()
+            avisar(self, "Não consegui registrar", str(exc))
+            return
+
+        if mov is None:
+            informar(self, "Nada mudou",
+                     "O sistema já estava com essa quantidade — não precisei ajustar nada.")
+            self.accept()
+            return
+
+        travados = [
+            k.rotulo for k in kits.kits_afetados(self.session, produto)
+            if kits.disponivel(self.session, k).quantidade <= 0
+        ]
+        msg = (f"{produto.rotulo}: {mov.quantidade:+d} unidade(s). "
+               f"Agora tem {mov.saldo_apos}.")
+        if travados:
+            msg += "\n\nIsso deixou sem poder montar:\n" + "\n".join(
+                f"  • {t}" for t in travados[:5]
+            )
+        informar(self, "Ajuste registrado", msg)
+        self.accept()
+
+
+class DialogoDespesa(QDialog):
+    """Lançar uma despesa — §5.8. Descrição é obrigatória de propósito."""
+
+    def __init__(self, session, pai=None):
+        super().__init__(pai)
+        self.session = session
+        self.setWindowTitle("Lançar despesa")
+        self.setMinimumWidth(620)
+
+        lay = QVBoxLayout(self)
+        lay.setSpacing(12)
+        lay.addWidget(titulo("Lançar despesa"))
+        lay.addWidget(dica(
+            "Gastos da loja que não são mercadoria. Compra de produto não entra "
+            "aqui — ela vira custo sozinha quando o produto é vendido."
+        ))
+
+        form = QFormLayout()
+        self.data = campo_data()
+        self.descricao = QLineEdit()
+        self.descricao.setPlaceholderText("ex.: caixas de papelão, anúncio patrocinado…")
+        self.categoria = QComboBox()
+        for codigo in CategoriaDespesa:
+            self.categoria.addItem(ROTULOS_DESPESA[codigo], str(codigo))
+        self.valor = QDoubleSpinBox()
+        self.valor.setRange(0, 9999999)
+        self.valor.setDecimals(2)
+        self.valor.setPrefix("R$ ")
+        self.observacao = QLineEdit()
+        self.observacao.setPlaceholderText("nota fiscal, fornecedor… (opcional)")
+
+        form.addRow("Data", self.data)
+        form.addRow("O que foi", self.descricao)
+        form.addRow("Tipo de gasto", self.categoria)
+        form.addRow("Valor", self.valor)
+        form.addRow("Observação", self.observacao)
+        lay.addLayout(form)
+
+        rodape = QHBoxLayout()
+        rodape.addStretch(1)
+        bt_cancelar = QPushButton("Cancelar")
+        bt_cancelar.clicked.connect(self.reject)
+        bt_ok = QPushButton("Lançar despesa")
+        bt_ok.setObjectName("primario")
+        bt_ok.clicked.connect(self._salvar)
+        rodape.addWidget(bt_cancelar)
+        rodape.addWidget(bt_ok)
+        lay.addLayout(rodape)
+
+    def _salvar(self):
+        try:
+            financeiro.registrar_despesa(
+                self.session,
+                self.descricao.text(),
+                self.valor.value(),
+                data=data_de(self.data),
+                categoria=self.categoria.currentData(),
+                observacao=self.observacao.text(),
+            )
+            self.session.commit()
+        except financeiro.ErroFinanceiro as exc:
+            self.session.rollback()
+            avisar(self, "Não consegui lançar", str(exc))
+            return
+        self.accept()
+
+
+class DialogoDespesas(QDialog):
+    """Lista de despesas do período, com lançar e apagar — §5.8."""
+
+    def __init__(self, session, inicio=None, fim=None, pai=None):
+        super().__init__(pai)
+        self.session = session
+        hoje = datetime.now()
+        padrao_inicio, padrao_fim = financeiro.mes(hoje.year, hoje.month)
+        self._inicio = inicio or padrao_inicio
+        self._fim = fim or padrao_fim
+
+        self.setWindowTitle("Despesas")
+        self.setMinimumSize(860, 480)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(titulo("Despesas"))
+
+        topo = QHBoxLayout()
+        self.f_inicio = campo_data(self._inicio)
+        self.f_fim = campo_data(self._fim)
+        self.f_inicio.dateChanged.connect(self.recarregar)
+        self.f_fim.dateChanged.connect(self.recarregar)
+        topo.addWidget(QLabel("De"))
+        topo.addWidget(self.f_inicio)
+        topo.addWidget(QLabel("até"))
+        topo.addWidget(self.f_fim)
+        topo.addStretch(1)
+        bt_nova = QPushButton("Lançar despesa")
+        bt_nova.setObjectName("primario")
+        bt_nova.clicked.connect(self.nova)
+        topo.addWidget(bt_nova)
+        lay.addLayout(topo)
+
+        self.tabela = QTableWidget(0, 5)
+        self.tabela.setHorizontalHeaderLabels(
+            ["Data", "O que foi", "Tipo", "Valor", ""]
+        )
+        self.tabela.verticalHeader().setVisible(False)
+        self.tabela.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela.verticalHeader().setDefaultSectionSize(44)
+        configurar_colunas(self.tabela, [130, None, 230, 130, 110])
+        lay.addWidget(self.tabela, 1)
+
+        self.rodape = dica("")
+        lay.addWidget(self.rodape)
+
+        fechar = QPushButton("Fechar")
+        fechar.clicked.connect(self.accept)
+        linha_fim = QHBoxLayout()
+        linha_fim.addStretch(1)
+        linha_fim.addWidget(fechar)
+        lay.addLayout(linha_fim)
+        self.recarregar()
+
+    def _periodo(self):
+        return data_de(self.f_inicio), financeiro.fim_do_dia(data_de(self.f_fim))
+
+    def nova(self):
+        if DialogoDespesa(self.session, self).exec():
+            self.recarregar()
+
+    def recarregar(self):
+        inicio, fim = self._periodo()
+        despesas = financeiro.listar_despesas(self.session, inicio, fim)
+        self.tabela.setRowCount(0)
+        total = 0.0
+        for despesa in despesas:
+            total += despesa.valor
+            i = self.tabela.rowCount()
+            self.tabela.insertRow(i)
+            self.tabela.setItem(i, 0, celula(f"{despesa.data:%d/%m/%Y}"))
+            self.tabela.setItem(
+                i, 1, celula(despesa.descricao, despesa.observacao or despesa.descricao)
+            )
+            self.tabela.setItem(i, 2, celula(despesa.categoria_rotulo))
+            valor = QTableWidgetItem(moeda(despesa.valor))
+            valor.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            self.tabela.setItem(i, 3, valor)
+            bt = QPushButton("Apagar")
+            bt.setObjectName("perigo")
+            bt.clicked.connect(lambda _, did=despesa.id: self._apagar(did))
+            self.tabela.setCellWidget(i, 4, bt)
+
+        self.rodape.setText(
+            f"{len(despesas)} despesa(s) no período — total de {moeda(total)}."
+            if despesas else "Nenhuma despesa lançada neste período."
+        )
+
+    def _apagar(self, despesa_id: int):
+        from ..core.models import Despesa
+
+        despesa = self.session.get(Despesa, despesa_id)
+        if despesa is None:
+            return
+        if not confirmar(
+            self, "Apagar despesa",
+            f"Vou apagar “{despesa.descricao}” de {moeda(despesa.valor)}.\n\n"
+            "Ela sai do balanço do período.",
+            "Apagar",
+        ):
+            return
+        try:
+            financeiro.remover_despesa(self.session, despesa_id)
+            self.session.commit()
+        except financeiro.ErroFinanceiro as exc:
+            self.session.rollback()
+            avisar(self, "Não consegui apagar", str(exc))
+            return
         self.recarregar()

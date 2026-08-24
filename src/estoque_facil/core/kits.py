@@ -111,6 +111,21 @@ def explodir(session: Session, produto: Produto, quantidade: int) -> list[ItemEx
     ]
 
 
+def custo_montado(session: Session, produto: Produto) -> float:
+    """Quanto custa UMA unidade deste produto, pronta para enviar.
+
+    Kit não tem custo próprio confiável: o que vale é a soma dos componentes,
+    porque é isso que sai da prateleira. O custo cadastrado no kit só entra
+    quando a composição ainda não existe — melhor um número aproximado do que
+    um lucro inflado por custo zero.
+    """
+    if not produto.eh_kit:
+        return round(produto.custo or 0.0, 4)
+    comps = componentes_de(session, produto)
+    soma = round(sum((c.componente.custo or 0.0) * c.quantidade for c in comps), 4)
+    return soma or round(produto.custo or 0.0, 4)
+
+
 def kits_afetados(session: Session, componente: Produto) -> list[Produto]:
     """Quais kits travam se este componente acabar (alerta em cascata — §5.2.4)."""
     linhas = session.scalars(

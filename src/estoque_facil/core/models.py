@@ -47,6 +47,7 @@ class TipoMovimento(enum.StrEnum):
     TRANSFERENCIA_ENTRADA = "transferencia_entrada"
     CANCELAMENTO = "cancelamento"
     DESMONTAGEM = "desmontagem"
+    PERDA = "perda"
 
 
 class OrigemMovimento(enum.StrEnum):
@@ -54,6 +55,30 @@ class OrigemMovimento(enum.StrEnum):
     IMPORTACAO_ML = "importacao_ml"
     IMPORTACAO_PLANILHA = "importacao_planilha"
     API_ML = "api_ml"
+
+
+class CategoriaDespesa(enum.StrEnum):
+    EMBALAGEM = "embalagem"
+    FRETE = "frete"
+    ANUNCIOS = "anuncios"
+    IMPOSTOS = "impostos"
+    TARIFAS = "tarifas"
+    FERRAMENTAS = "ferramentas"
+    PRO_LABORE = "pro_labore"
+    OUTROS = "outros"
+
+
+# Rótulos em português, na ordem em que aparecem na tela.
+ROTULOS_DESPESA: dict[str, str] = {
+    CategoriaDespesa.EMBALAGEM: "Embalagem e envio",
+    CategoriaDespesa.FRETE: "Frete pago",
+    CategoriaDespesa.ANUNCIOS: "Anúncios e publicidade",
+    CategoriaDespesa.IMPOSTOS: "Impostos e taxas",
+    CategoriaDespesa.TARIFAS: "Tarifas e bancos",
+    CategoriaDespesa.FERRAMENTAS: "Internet, sistemas e assinaturas",
+    CategoriaDespesa.PRO_LABORE: "Retirada / pró-labore",
+    CategoriaDespesa.OUTROS: "Outros",
+}
 
 
 class StatusLote(enum.StrEnum):
@@ -260,3 +285,118 @@ class Config(Base):
 
     chave: Mapped[str] = mapped_column(String(80), primary_key=True)
     valor: Mapped[str] = mapped_column(Text, default="")
+
+
+class VendaItem(Base):
+    """O DINHEIRO de uma linha do relatório de vendas — ESCOPO.md §4.4.
+
+    `Movimento` guarda quantidade; esta tabela guarda valor. A separação é de
+    propósito e sustenta os dois invariantes ao mesmo tempo:
+
+      • estoque  = soma dos movimentos
+      • balanço  = soma destas linhas + despesas − perdas
+
+    Uma venda de kit gera N movimentos (um por componente) e UMA linha aqui.
+
+    Custo e imposto são gravados como FOTOGRAFIA do momento da importação. Se o
+    custo do produto mudar amanhã, o lucro de ontem continua o mesmo — que é o
+    comportamento correto para um balanço fechado.
+    """
+
+    __tablename__ = "venda_item"
+    __table_args__ = (
+        UniqueConstraint("numero_venda", "sku_ref", name="uq_venda_item"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    numero_venda: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+
+    # SKU (ou MLB) normalizado do relatório. Faz parte da chave porque uma venda
+    # com vários produtos ("Pacote de diversos produtos") traz N linhas com o
+    # MESMO N.º de venda — o mesmo motivo de `produto_id` estar na chave de
+    # idempotência dos movimentos.
+    sku_ref: Mapped[str] = mapped_column(String(200), nullable=False)
+
+    # Nulo quando o SKU do relatório não casou com nenhum produto: a receita
+    # existe e entra no balanço, mas sem custo. O balanço avisa quantas são.
+    produto_id: Mapped[int | None] = mapped_column(ForeignKey("produto.id"), index=True)
+    titulo: Mapped[str] = mapped_column(String(300), default="")
+
+    quantidade: Mapped[int] = mapped_column(Integer, default=0)
+    devolvidas: Mapped[int] = mapped_column(Integer, default=0)
+    abateu_estoque: Mapped[bool] = mapped_column(Boolean, default=True)
+    cancelada: Mapped[bool] = mapped_column(Boolean, default=False)
+    local_codigo: Mapped[str] = mapped_column(String(20), default=CASA)
+
+    # Valores como o Mercado Livre entrega: tarifas e envio já vêm negativos.
+    preco_unitario: Mapped[float] = mapped_column(Float, default=0.0)
+    receita_produtos: Mapped[float] = mapped_column(Float, default=0.0)
+    receita_envio: Mapped[float] = mapped_column(Float, default=0.0)
+    tarifa_venda: Mapped[float] = mapped_column(Float, default=0.0)
+    tarifa_envio: Mapped[float] = mapped_column(Float, default=0.0)
+    descontos: Mapped[float] = mapped_column(Float, default=0.0)
+    cancelamentos: Mapped[float] = mapped_column(Float, default=0.0)
+    total_liquido: Mapped[float] = mapped_column(Float, default=0.0)
+
+    custo_unitario: Mapped[float] = mapped_column(Float, default=0.0)
+    imposto_unitario: Mapped[float] = mapped_column(Float, default=0.0)
+
+    data_venda: Mapped[datetime | None] = mapped_column(DateTime, index=True)
+    lote_id: Mapped[int | None] = mapped_column(ForeignKey("lote_importacao.id"), index=True)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_agora)
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, default=_agora, onupdate=_agora)
+
+    produto: Mapped[Produto | None] = relationship()
+
+    @property
+    def quantidade_faturada(self) -> int:
+        """O que ficou vendido de fato: unidades menos as devolvidas."""
+        return max(self.quantidade - self.devolvidas, 0)
+
+    @property
+    def custo_total(self) -> float:
+        return round(self.custo_unitario * self.quantidade_faturada, 2)
+
+    @property
+    def imposto_total(self) -> float:
+        return round(self.imposto_unitario * self.quantidade_faturada, 2)
+
+    @property
+    def lucro(self) -> float:
+        """Sobra desta linha antes das despesas da loja."""
+        return round(self.total_liquido - self.custo_total - self.imposto_total, 2)
+
+    @property
+    def sem_custo(self) -> bool:
+        """Linha que entra na receita mas não sabe o próprio custo."""
+        return self.quantidade_faturada > 0 and self.custo_unitario <= 0
+
+    def __repr__(self) -> str:
+        return f"<VendaItem {self.numero_venda} {self.sku_ref} R$ {self.total_liquido:.2f}>"
+
+
+class Despesa(Base):
+    """Gasto da loja que não é mercadoria — ESCOPO.md §4.4.
+
+    Compra de mercadoria NÃO entra aqui: ela vira custo quando o produto é
+    vendido (CMV), senão o mês em que ela repõe estoque aparece no prejuízo e o
+    mês em que ela vende aparece com lucro irreal.
+    """
+
+    __tablename__ = "despesa"
+    __table_args__ = (CheckConstraint("valor > 0", name="ck_despesa_valor"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    descricao: Mapped[str] = mapped_column(String(300), nullable=False)
+    categoria: Mapped[str] = mapped_column(String(30), default=CategoriaDespesa.OUTROS, index=True)
+    valor: Mapped[float] = mapped_column(Float, nullable=False)
+    observacao: Mapped[str | None] = mapped_column(Text)
+    criado_em: Mapped[datetime] = mapped_column(DateTime, default=_agora)
+
+    @property
+    def categoria_rotulo(self) -> str:
+        return ROTULOS_DESPESA.get(self.categoria, "Outros")
+
+    def __repr__(self) -> str:
+        return f"<Despesa {self.data:%d/%m/%Y} {self.descricao} R$ {self.valor:.2f}>"

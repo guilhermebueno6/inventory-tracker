@@ -11,7 +11,8 @@ O escopo completo, com as decisões e o porquê de cada uma, está em
 1. **Saber quanto tem de cada produto**, sem planilha manual.
 2. **Dar baixa das vendas** importando o relatório que o Mercado Livre já gera.
 3. **Kits que compartilham componentes** — o problema que planilha nenhuma resolve.
-4. **Não perder os dados**, com backup automático em CSV.
+4. **Saber se sobrou dinheiro no mês** — vendas, tarifas do ML, custo, perdas e despesas.
+5. **Não perder os dados**, com backup automático em CSV.
 
 ### A ideia central: kit não tem estoque
 
@@ -36,7 +37,7 @@ python -m estoque_facil
 Testes:
 
 ```bash
-pytest -q                      # 66 testes
+pytest -q                      # 96 testes
 QT_QPA_PLATFORM=offscreen pytest -q   # em servidor sem tela
 ruff check src tests
 ```
@@ -50,9 +51,42 @@ ruff check src tests
 3. **Configurar kits que faltam** — para cada kit, escolha de que ele é montado.
    As sugestões já vêm ordenadas por semelhança de nome.
 4. **Importar vendas** — arraste o relatório do ML. Confira e confirme.
+5. **Lançar as despesas do mês** e abrir o **Balanço**.
 
 > A ordem importa: se importar vendas com kits ainda sem composição, essas linhas
 > ficam pendentes e o trabalho precisa ser refeito.
+
+## O balanço: sobrou dinheiro no mês?
+
+A mesma importação que baixa o estoque guarda o **dinheiro** de cada venda — receita,
+tarifa do Mercado Livre, frete e cancelamento, direto das colunas do relatório. Com as
+despesas lançadas à mão, o app fecha a conta:
+
+```
+  Vendas de produtos + frete − tarifas do ML − envio
+= Recebido do Mercado Livre        (bate com a coluna "Total (BRL)")
+− Custo dos produtos vendidos      (custo fotografado no dia da venda)
+− Impostos, perdas e despesas
+= Lucro do período
+```
+
+Três coisas que essa parte faz questão de acertar:
+
+- **A tarifa do ML vem do relatório**, nunca digitada. É o segundo maior custo da
+  operação e erraria sempre se dependesse de memória.
+- **O custo é uma fotografia.** Mudar o preço de compra hoje não reescreve o lucro
+  de um mês já fechado. Para kit, o custo é a soma dos componentes.
+- **Venda sem custo cadastrado aparece marcada**, não escondida — a margem mostra
+  `sem custo` em vez de um número bonito e falso.
+
+**Perda não é ajuste.** Quebrou, sumiu ou virou brinde entra como `perda` e **custa**
+no balanço; contagem de prateleira entra como `inventario` e não custa nada. É a mesma
+tela (**Estoque → Perda / ajuste**), e o motivo escolhido decide o resto.
+
+Compra de mercadoria **não** é despesa: ela vira custo quando o produto vende. Lançá-la
+como despesa jogaria o mês da reposição no prejuízo e o mês da venda num lucro irreal.
+
+O período inteiro sai em CSV (**Balanço → Exportar planilha**) para mandar ao contador.
 
 ## Atualizar sem perder o estoque
 
@@ -124,7 +158,7 @@ src/estoque_facil/
 │   ├── kits.py      disponibilidade, explosão, cascata
 │   └── db.py        SQLite (WAL), caminhos por SO
 ├── importers/     leitura de arquivos externos
-├── services/      importação, backup, sugestão, updater
+├── services/      importação, financeiro (balanço), backup, sugestão, updater
 └── ui/            PySide6
 ```
 
@@ -140,6 +174,11 @@ importar o mesmo arquivo duas vezes não faz nada — é seguro por construção
 
 **Classificação casa × Full pela coluna `Forma de entrega`,** nunca pelo nome do
 depósito, que é texto livre.
+
+**Quantidade e dinheiro em tabelas separadas.** `movimento` responde "quanto tem";
+`venda_item` responde "quanto entrou". Uma venda de kit gera vários movimentos (um por
+componente) e uma única linha de dinheiro — juntar as duas quebraria o estoque na
+primeira venda de kit.
 
 ## Empacotar
 

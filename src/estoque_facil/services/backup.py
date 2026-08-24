@@ -20,7 +20,7 @@ from ..core.models import Base, Composicao, Produto, Saldo
 
 RETENCAO_DIAS = 30
 TABELAS = ["produto", "composicao", "saldo", "movimento", "local_estoque",
-           "lote_importacao", "vinculo_ml", "config"]
+           "lote_importacao", "vinculo_ml", "config", "venda_item", "despesa"]
 
 
 def _escrever_tabela(session: Session, nome: str, destino: Path) -> int:
