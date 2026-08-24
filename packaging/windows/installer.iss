@@ -22,6 +22,8 @@ PrivilegesRequired=lowest
 ; Por isso o desinstalador não encosta no estoque — não acrescente nada aqui
 ; que apague {localappdata}\EstoqueFacil.
 UninstallDisplayIcon={app}\EstoqueFacil.exe
+; o assistente de instalação também leva a marca (manual §05)
+SetupIconFile={#SourcePath}\..\..\src\estoque_facil\resources\icone.ico
 
 [Languages]
 Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"

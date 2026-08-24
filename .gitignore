@@ -7,6 +7,11 @@ dist/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+# saída que o próprio app oferece por padrão: quem roda `python -m estoque_facil`
+# da raiz e clica em Exportar planilha / Fazer backup cai aqui dentro
+balanco-*.csv
+backup-estoque*.zip
+
 *.db
 *.db-wal
 *.db-shm

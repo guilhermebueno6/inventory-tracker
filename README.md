@@ -26,6 +26,15 @@ disponível(kit) = min( estoque(componente) ÷ quantidade necessária )
 Assim, quando o mordedor-pé rosa acaba, o app sabe **sozinho** que o `KIT.MAOPE.ROSA`
 foi a zero — e diz quais outros kits aquele item trava.
 
+## Aparência
+
+A interface segue o [manual da marca](design-document.md): paleta mono com um
+vermelho só, tipografia Archivo (empacotada com o app, nada a instalar), canto
+zero em tudo e a régua de 2px como único separador.
+
+Onde o manual vira código, e onde ele foi adaptado para não brigar com o
+requisito de acessibilidade do escopo, está em [`docs/DESIGN.md`](docs/DESIGN.md).
+
 ## Rodando em modo de desenvolvimento
 
 ```bash
@@ -37,7 +46,7 @@ python -m estoque_facil
 Testes:
 
 ```bash
-pytest -q                      # 96 testes
+pytest -q                      # 138 testes
 QT_QPA_PLATFORM=offscreen pytest -q   # em servidor sem tela
 ruff check src tests
 ```
