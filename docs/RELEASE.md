@@ -58,6 +58,34 @@ git push origin main --tags
 O workflow `release.yml` compila nas duas plataformas, calcula o `SHA256SUMS` e
 cria o Release. Leva alguns minutos.
 
+> Não crie o Release pela interface do GitHub ("Draft a new release"). Ela marca
+> a tag e publica o Release na hora, **vazio**; o workflow só anexa os arquivos
+> quando termina de compilar. Se falhar, o Release fica lá sem nada para baixar.
+
+## 3b. O Release saiu sem os executáveis
+
+Aconteceu na v0.3: o build falhou e o Release ficou só com as notas, sem `.exe`
+nem `.dmg`. Não precisa apagar a tag nem publicar outra versão — dá para
+recompilar a mesma tag e anexar os arquivos ao Release que já está lá:
+
+```bash
+gh workflow run release.yml --ref main -f tag=v0.3
+```
+
+O workflow compila o código **da tag** informada e anexa os arquivos, sem mexer
+no texto do Release. Pela interface: aba **Actions → release → Run workflow**,
+preenchendo a tag.
+
+Antes de rodar, veja por que o build caiu:
+
+```bash
+gh run list --workflow=release.yml --limit 5
+gh run view <id> --log-failed
+```
+
+Se o motivo estiver no código (e não no CI), corrija na `main` primeiro e mova a
+tag para o commit corrigido — senão o rebuild vai falhar igual.
+
 ## 4. Confira
 
 O app instalado busca a versão nova na próxima abertura. Para testar sem esperar:
@@ -67,7 +95,8 @@ Se a tag foi publicada mas o app não enxerga:
 
 - o `GITHUB_REPO` em `version.py` aponta para o repositório certo?
 - o repositório é público? (privado exigiria token embutido — má ideia)
-- o Release tem os arquivos `.exe`/`.dmg` **e** o `SHA256SUMS`?
+- o Release tem os arquivos `.exe`/`.dmg` **e** o `SHA256SUMS`? (se não tem,
+  veja a seção 3b — sem instalador o app não oferece atualização nenhuma)
 
 ## Se uma atualização der errado
 

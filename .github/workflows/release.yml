@@ -3,6 +3,15 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Para quando o Release já existe mas ficou sem os executáveis (build que
+  # falhou, ou Release criado à mão pela interface do GitHub). Rode este
+  # workflow a partir da main informando a tag: ele compila o código DA TAG e
+  # anexa os arquivos ao Release que já está lá, sem apagar nem remarcar nada.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag já publicada (ex.: v0.3)"
+        required: true
 
 jobs:
   build:
@@ -17,6 +26,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -25,7 +36,9 @@ jobs:
 
       - name: Versão da tag
         shell: bash
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: echo "APP_VERSION=${TAG#v}" >> $GITHUB_ENV
 
       # Se a tag e o version.py divergirem, o app instalado compara a versão
       # dele com a do release, nunca fica igual, e passa a oferecer atualização
@@ -33,13 +46,25 @@ jobs:
       - name: A tag precisa bater com o version.py
         shell: bash
         run: |
-          NO_CODIGO=$(python -c "from estoque_facil.version import __version__; print(__version__)")
-          if [ "$NO_CODIGO" != "$APP_VERSION" ]; then
-            echo "A tag diz v$APP_VERSION, mas version.py diz $NO_CODIGO."
-            echo "Ajuste src/estoque_facil/version.py e marque a tag de novo."
-            exit 1
-          fi
-          echo "versão conferida: $APP_VERSION"
+          # Comparação por número, não por texto: a tag v0.3 e o version.py
+          # 0.3.0 são a MESMA versão, e é assim que o updater as compara
+          # (services/updater._versao_tupla). Comparar o texto cru derrubou o
+          # build da v0.3 e o Release saiu sem nenhum executável.
+          python - <<'PY'
+          import os, re, sys
+          from estoque_facil.version import __version__
+
+          def normalizar(texto):
+              numeros = re.findall(r"\d+", texto or "")
+              return tuple(int(n) for n in (numeros + ["0", "0", "0"])[:3])
+
+          tag = os.environ["APP_VERSION"]
+          if normalizar(tag) != normalizar(__version__):
+              print(f"A tag diz v{tag}, mas version.py diz {__version__}.")
+              print("Ajuste src/estoque_facil/version.py e marque a tag de novo.")
+              sys.exit(1)
+          print(f"versão conferida: tag v{tag} == version.py {__version__}")
+          PY
 
       - name: Build
         run: pyinstaller packaging/estoque_facil.spec --noconfirm
@@ -121,7 +146,16 @@ jobs:
           cat tudo/*/SHA256SUMS > release/SHA256SUMS
           ls -la release
           test -s release/SHA256SUMS || { echo "SHA256SUMS vazio"; exit 1; }
+
+          # Um Release sem instalador não serve para ninguém: nem para baixar à
+          # mão, nem para o updater (services/updater procura .exe e .dmg).
+          # Melhor falhar aqui do que publicar um Release vazio como o da v0.3.
+          ls release/*.exe >/dev/null 2>&1 || { echo "faltou o instalador do Windows"; exit 1; }
+          ls release/*.dmg >/dev/null 2>&1 || { echo "faltou o DMG do macOS"; exit 1; }
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: release/*
-          generate_release_notes: true
+          # No gatilho manual o Release já existe e já tem texto: só anexamos os
+          # arquivos, sem reescrever as notas que estão publicadas.
+          generate_release_notes: ${{ github.event_name == 'push' }}
