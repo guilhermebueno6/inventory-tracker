@@ -144,7 +144,8 @@ class TelaInicial(QWidget):
         grade.setSpacing(14)
         botoes = [
             ("Ver estoque", "o que tem e o que está acabando", janela.abrir_estoque),
-            ("Importar vendas", "baixar o relatório do Mercado Livre", janela.importar_vendas),
+            ("Importar vendas", "planilha ou PDF de etiquetas do ML",
+             janela.importar_vendas),
             ("Entrada de mercadoria", "registrar o que chegou", janela.abrir_entrada),
             ("Lançar despesa", "o que você gastou com a loja", janela.lancar_despesa),
             ("Balanço", "quanto sobrou no mês", janela.abrir_balanco),
@@ -436,10 +437,18 @@ class JanelaPrincipal(QMainWindow):
                     f"\n{r.linhas_corrigidas} venda(s) que já estavam aqui foram "
                     "atualizadas (cancelamento ou devolução no relatório novo)."
                 )
+            # A etiqueta do Flex não traz valores (§2.9): dizer "0 linhas
+            # entraram no balanço" pareceria erro. Melhor explicar o porquê.
+            dinheiro = (
+                "Este arquivo não traz valores, então o balanço não mudou — "
+                "os valores dessas vendas entram quando você importar a planilha."
+                if r.sem_valores
+                else f"{r.linhas_financeiras} linha(s) entraram no balanço."
+            )
             informar(
                 self, "Baixa concluída",
                 f"{r.vendas_aplicadas} vendas lançadas, {r.movimentos} movimentos "
-                f"de estoque.\n{r.linhas_financeiras} linha(s) entraram no balanço."
+                f"de estoque.\n{dinheiro}"
                 f"{extra}\n\nSe algo saiu errado, use Vendas → Ver importações "
                 "para desfazer.",
             )

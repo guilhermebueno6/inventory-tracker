@@ -289,6 +289,22 @@ def test_tela_de_importacao_classifica_as_linhas(app, loja, session, monkeypatch
     assert tela.abas.count() >= 2
     assert tela.bt_confirmar.isEnabled()
     assert "venda" in a.resumo().lower()
+    # isVisibleTo: o diálogo não é exibido no teste, então isVisible() é sempre falso
+    assert not tela.lb_sobre_arquivo.isVisibleTo(tela), "planilha não precisa de ressalva"
+
+
+def test_tela_de_importacao_avisa_que_a_etiqueta_flex_nao_mexe_no_balanco(
+    app, loja, session
+):
+    """§2.9 — o PDF baixa estoque e não tem valores. Ela precisa saber disso."""
+    from estoque_facil.ui.tela_importacao import TelaImportacao
+
+    tela = TelaImportacao(session, FIXTURES / "etiquetas_flex_exemplo.pdf")
+    assert tela.analise is not None
+    assert len(tela.analise.relatorio.linhas) == 16
+    assert tela.lb_sobre_arquivo.isVisibleTo(tela)
+    assert "balanço não muda" in tela.lb_sobre_arquivo.text()
+    assert tela.bt_confirmar.isEnabled()
 
 
 # ------------------------------------------------------------------- balanço

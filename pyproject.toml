@@ -1,6 +1,6 @@
 [project]
 name = "estoque-facil"
-version = "0.2.1"
+version = "0.3.0"
 description = "Controle de estoque para loja do Mercado Livre"
 requires-python = ">=3.11"
 dependencies = [
@@ -8,6 +8,7 @@ dependencies = [
     "SQLAlchemy>=2.0",
     "alembic>=1.13",
     "openpyxl>=3.1",
+    "pypdf>=5.0",
     "platformdirs>=4.0",
     "httpx>=0.27",
     "keyring>=25.0",

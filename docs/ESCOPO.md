@@ -174,6 +174,54 @@ Cria o catálogo com quantidade zero e ela só preenche as quantidades contando 
 
 ⚠️ Com kits na v1, há um passo a mais: os itens criados assim entram como **simples**. Ela precisa depois marcar quais são kits e montar a composição. O app deve **sugerir** os candidatos — SKU começando com `kit` ou título começando com "Kit" acerta a maioria (`KIT.MAOPE.ROSA`, `kit.travesseirosazul`, `kit.livros.4amigosdomar`, `caixahuggies.lenço`, `pamperspantsM+lenço`). Sugerir, nunca decidir sozinho.
 
+### 2.9 O buraco do Flex — e a lista de etiquetas em PDF
+
+**Achado de operação (25/08/2026):** a planilha de vendas da §2 **não traz as
+vendas do Mercado Envios Flex**, só as do Places/Correios. Quem importa apenas o
+Excel nunca dá baixa dessas vendas — e o estoque de casa vai ficando alto demais
+justamente nos itens que mais giram.
+
+A saída é o arquivo que ela já usa todo dia: a **lista de etiquetas do Flex**,
+em PDF, que o ML gera na hora de despachar. Ele entra como **alternativa**, não
+como substituto — a planilha continua sendo o caminho principal.
+
+**O que o PDF tem, por etiqueta:**
+
+| Campo | Onde aparece | Uso |
+|---|---|---|
+| N.º de envio | primeira linha da coluna "Identificação" | separa uma etiqueta da outra |
+| `Pack ID` | coluna "Identificação" (opcional) | informativo |
+| **`Venda:`** | coluna "Identificação" | **mesma chave de idempotência da §2.3** |
+| Comprador | coluna "Identificação" | ignorado — não interessa ao estoque |
+| Título do anúncio | coluna "Produtos" | nome legível, serve para a §2.8 |
+| **`SKU:`** | coluna "Produtos" | **casamento com o catálogo (§2.4)** |
+| **`Quantidade:`** | coluna "Produtos" | quantidade vendida |
+| `Cor:`, `Tamanho:`, … | coluna "Produtos" | vira a `Variação` no formato da planilha |
+
+**O que o PDF NÃO tem: valores, data da venda e status.**
+
+Três consequências, e a ordem importa:
+
+1. **A deduplicação continua sendo por N.º de venda** (§2.3), e é o mesmo número
+   nos dois arquivos. Ela pode importar a planilha e o PDF, na ordem que quiser,
+   quantas vezes quiser: a venda que já entrou por um caminho é reconhecida pelo
+   outro. É o índice único do banco que garante isso, não a aplicação (§4.3).
+2. **A etiqueta não escreve no balanço.** Sem valores, gravar a linha financeira
+   significaria gravar zeros — uma venda com custo e receita nenhuma, ou seja, um
+   prejuízo que não existe. Receita faltando é ruim; receita inventada é pior. A
+   tela de conferência diz isso com todas as letras antes de confirmar.
+3. **Flex é sempre estoque de casa** (§2.5): o despacho é próprio, nunca sai do
+   Full.
+
+**Data da venda:** a etiqueta é impressa no dia do despacho, então a data do PDF
+serve de data do movimento. Na ordem: data no nome do arquivo → data de criação
+do PDF → data do arquivo em disco.
+
+⚠️ **A armadilha da implementação:** o PDF tem **duas colunas** e o texto corrido
+as embaralha — o nome do comprador cai no meio dos dados do produto. A separação
+é feita pela **coordenada X** de cada pedaço de texto, e `SKU:` e o valor dele são
+pedaços separados que só se juntam agrupando por Y. Ver `importers/ml_flex_pdf.py`.
+
 ---
 
 ## 3. Stack e decisões técnicas
@@ -325,9 +373,9 @@ id, data, descricao (obrigatória), categoria, valor (> 0), observacao, criado_e
 
 Sete passos, e o quarto é o que garante que nada saia errado:
 
-1. **Arrastar o XLSX** na janela, ou botão grande **"Importar vendas"**.
-2. **Ler e normalizar** conforme §2.
-3. **Deduplicar** por `N.º de venda`. Já conhecidos são separados em "já processadas".
+1. **Escolher o arquivo** no botão grande **"Importar vendas"** — a planilha de vendas (§2) **ou** o PDF de etiquetas do Flex (§2.9).
+2. **Ler e normalizar** conforme §2 (ou §2.9), sempre para o mesmo formato interno.
+3. **Deduplicar** por `N.º de venda`, seja qual for o arquivo de origem. Já conhecidos são separados em "já processadas".
 4. **Explodir kits** — cada linha de venda de kit vira N baixas de componentes (§5.2).
 5. **Tela de conferência** — nada foi gravado ainda:
 
@@ -345,6 +393,8 @@ Sete passos, e o quarto é o que garante que nada saia errado:
 8. **Desfazer** disponível na tela de importações — reverte o lote inteiro, componentes incluídos.
 
 **Kit sem composição:** bloqueia só aquela linha, nunca a importação inteira. As outras vendas passam normalmente.
+
+**Etiqueta do Flex:** baixa estoque e **não escreve no balanço** (§2.9). A tela diz isso, com todas as letras, antes do passo 7.
 
 **Saldo negativo:** avisa com destaque mas **não bloqueia**. Estoque negativo é informação real (algo não foi cadastrado), e travar a importação faria ela desistir do app. Fica marcado em vermelho na tela principal até ser ajustado.
 
@@ -756,6 +806,7 @@ Ferramentas: `pytest`, `ruff`, `mypy` no `core/`. CI em cada PR.
 - [ ] CRUD de produtos + cadastro rápido + editor de composição
 - [ ] **Importador do XLSX do ML** com tela de conferência (§5.1)
 - [ ] Classificação casa × Full por `Forma de entrega` (§2.5)
+- [ ] **Importador do PDF de etiquetas do Flex** — as vendas que a planilha não traz (§2.9)
 - [ ] Cadastro automático a partir do relatório, com sugestão de kits (§2.8)
 - [ ] **Carga inicial em 3 passos** (§5.3): CSV de custos → nomes via relatório ML → marcar kits
 - [ ] **Transformar item em kit** + tela "Kits sem composição" + sugestão por nome (§5.2.1–5.2.2)

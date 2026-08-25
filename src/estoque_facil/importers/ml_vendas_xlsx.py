@@ -15,7 +15,7 @@ from __future__ import annotations
 import re
 import unicodedata
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -106,7 +106,7 @@ def parse_data(txt: str) -> datetime | None:
     return datetime(int(ano), MESES[mes], int(dia), int(hora or 0), int(minuto or 0))
 
 
-def _data_do_nome(caminho: Path) -> datetime | None:
+def data_do_nome(caminho: Path) -> datetime | None:
     m = re.search(r"(20\d{2})(\d{2})(\d{2})", caminho.name)
     if not m:
         return None
@@ -178,6 +178,14 @@ class LinhaVenda:
     descontos: float = 0.0           # acréscimos e bônus, com o sinal do ML
     cancelamentos: float = 0.0       # estornos, negativos
 
+    # A etiqueta Flex (§2.9) não traz dinheiro nenhum: baixa estoque e não
+    # encosta no balanço. Falso aqui significa "não invente receita".
+    tem_financeiro: bool = True
+
+    # Recado desta linha específica para a tela de conferência. Vazio no caminho
+    # normal; a etiqueta usa quando teve que assumir alguma coisa.
+    aviso: str = ""
+
     @property
     def confere(self) -> bool:
         """As partes somam o total do relatório? Vale como sanidade do parser."""
@@ -209,6 +217,13 @@ class RelatorioML:
     arquivo: str
     periodo_inicio: datetime | None
     periodo_fim: datetime | None
+
+    # De onde veio: planilha de vendas (§2) ou etiquetas do Flex (§2.9). Vira o
+    # `tipo` do lote de importação, que é o que a tela de desfazer mostra.
+    tipo: str = "vendas_ml"
+
+    # Recados do arquivo inteiro — o que o parser teve que deixar de fora.
+    avisos: list[str] = field(default_factory=list)
 
     @property
     def total_unidades(self) -> int:
@@ -249,7 +264,7 @@ def ler(caminho: str | Path) -> RelatorioML:
             "talvez seja o relatório de tarifas, e não o de vendas."
         )
 
-    fallback = _data_do_nome(caminho)
+    fallback = data_do_nome(caminho)
     linhas: list[LinhaVenda] = []
 
     for offset, row in enumerate(rows[inicio + 1 :], start=inicio + 2):
