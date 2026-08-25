@@ -35,3 +35,38 @@ def test_migracoes_acompanham_a_versao():
     from estoque_facil.core.migracoes import revisao_do_codigo
 
     assert revisao_do_codigo() is not None, "sem migração, o banco não evolui"
+
+
+def test_tag_curta_e_a_mesma_versao():
+    """A v0.3 foi marcada como `v0.3` com o version.py em `0.3.0`.
+
+    As duas são a mesma versão: quem já está na 0.3.0 não pode receber oferta
+    de atualização, e o release.yml não pode recusar a tag por isso.
+    """
+    assert not ha_versao_nova("0.3.0", "v0.3")
+    assert not ha_versao_nova("0.3", "v0.3.0")
+    assert ha_versao_nova("0.2.1", "v0.3")
+    assert ha_versao_nova("0.3", "v0.3.1")
+
+
+def test_release_sem_executavel_nao_vira_atualizacao():
+    """Foi o caso da v0.3: Release publicado, mas com zero arquivos.
+
+    Sem instalador não há o que baixar — o app precisa ficar quieto em vez de
+    tentar atualizar para o nada.
+    """
+    import httpx
+
+    from estoque_facil.services import updater
+
+    resposta = httpx.Response(
+        200,
+        json={"tag_name": "v0.9.0", "body": "notas", "assets": []},
+        request=httpx.Request("GET", "https://api.github.com/"),
+    )
+    original = httpx.get
+    httpx.get = lambda *a, **k: resposta
+    try:
+        assert updater.verificar(repo="x/y", atual="0.3.0") is None
+    finally:
+        httpx.get = original

@@ -26,9 +26,15 @@ API = "https://api.github.com/repos/{repo}/releases/latest"
 TEMPO_LIMITE = 15.0
 
 
-def _versao_tupla(texto: str) -> tuple[int, ...]:
+def _versao_tupla(texto: str) -> tuple[int, int, int]:
+    """Completa com zeros: a tag v0.3 e o version.py 0.3.0 são a mesma versão.
+
+    Sem completar, (0, 3) e (0, 3, 0) seriam versões diferentes e o app ficaria
+    oferecendo uma atualização que ele já tem. O release.yml confere a tag com
+    esta mesma regra.
+    """
     numeros = re.findall(r"\d+", texto or "")
-    return tuple(int(n) for n in numeros[:3]) or (0,)
+    return tuple(int(n) for n in (numeros + ["0", "0", "0"])[:3])  # type: ignore[return-value]
 
 
 def ha_versao_nova(atual: str, remota: str) -> bool:
