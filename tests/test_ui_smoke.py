@@ -96,6 +96,77 @@ def test_editor_de_composicao_sugere_e_confere_custo(app, loja, session):
     assert "bate com o custo" in editor.lb_custo.text()
 
 
+def test_busca_de_item_lista_o_que_casa_em_qualquer_pedaco(app, loja, session):
+    from estoque_facil.ui.tela_produto import EditorComposicao
+
+    kit = repo.por_sku(session, "KIT.MAOPE.AZUL")
+    editor = EditorComposicao(session, kit)
+
+    # o catálogo tem mord.mao.rosa e mord.mao.azul: os dois precisam aparecer
+    ids = [pid for _rotulo, pid in editor.campo_busca.opcoes("mord.mao")]
+    assert repo.por_sku(session, "mord.mao.azul").id in ids
+    assert repo.por_sku(session, "mord.mao.rosa").id in ids
+    # kit nenhum entra na lista — só item simples vira componente
+    assert kit.id not in ids
+
+    # e o pedaço do meio do nome também acha (o padrão do Qt só casa o começo)
+    assert editor.campo_busca.opcoes("mao.azul")
+
+
+def test_busca_ambigua_nao_adiciona_o_primeiro_que_achar(app, loja, session):
+    from estoque_facil.ui.tela_produto import EditorComposicao
+
+    kit = repo.por_sku(session, "KIT.MAOPE.AZUL")
+    editor = EditorComposicao(session, kit)
+    editor.campo_busca.setText("mord.mao")
+    editor._buscar_e_adicionar()
+    assert editor.itens() == {}, "com dois candidatos ela escolhe na lista"
+
+    # já o código exato entra direto
+    editor.campo_busca.setText("mord.mao.azul")
+    editor._buscar_e_adicionar()
+    assert list(editor.itens()) == [repo.por_sku(session, "mord.mao.azul").id]
+    assert editor.campo_busca.text() == ""
+
+
+def test_escolher_na_lista_adiciona_o_item(app, loja, session):
+    from estoque_facil.ui.tela_produto import EditorComposicao
+
+    kit = repo.por_sku(session, "KIT.MAOPE.AZUL")
+    editor = EditorComposicao(session, kit)
+    completador = editor.campo_busca.completer()
+    completador.setCompletionPrefix("mord.pe.azul")
+    assert completador.setCurrentRow(0)
+    editor.campo_busca._escolher(completador.currentIndex())
+    assert list(editor.itens()) == [repo.por_sku(session, "mord.pe.azul").id]
+
+
+def test_enter_na_lista_adiciona_uma_vez_so(app, loja, session):
+    """O Enter dispara `returnPressed` E a escolha do QCompleter — só pode entrar um."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from estoque_facil.ui.tela_produto import EditorComposicao
+
+    kit = repo.por_sku(session, "KIT.MAOPE.AZUL")
+    editor = EditorComposicao(session, kit)
+    editor.show()
+    campo = editor.campo_busca
+    campo.setFocus()
+    QTest.keyClicks(campo, "mord.pe.azul")
+    app.processEvents()
+    assert campo.lista_aberta()
+
+    QTest.keyClick(campo.completer().popup(), Qt.Key_Down)     # desce até o item
+    QTest.keyClick(campo.completer().popup(), Qt.Key_Return)
+    app.processEvents()
+
+    assert list(editor.itens()) == [repo.por_sku(session, "mord.pe.azul").id]
+    assert editor.itens()[repo.por_sku(session, "mord.pe.azul").id] == 1
+    assert campo.text() == ""
+    editor.close()
+
+
 def test_editor_recusa_kit_dentro_de_kit(app, loja, session):
     from estoque_facil.ui.tela_produto import EditorComposicao
 

@@ -174,6 +174,15 @@ QComboBox QAbstractItemView {
     outline: none; padding: 2px;
 }
 
+/* A lista suspensa da busca de item (QCompleter) é um QListView solto, e não
+   entra na regra do QComboBox acima — sem isto ela abre com o cinza do sistema. */
+QListView#listaBusca {
+    background: @SUPERFICIE@; border: 2px solid @TINTA@;
+    selection-background-color: @TINTA@; selection-color: @SUPERFICIE@;
+    outline: none; padding: 2px;
+}
+QListView#listaBusca::item { padding: 8px 10px; border: none; }
+
 /* --------------------------------------------------------------- tabelas */
 /* Cabeçalho em rótulo caixa alta sobre a régua de 2px — manual §04 e §05. */
 

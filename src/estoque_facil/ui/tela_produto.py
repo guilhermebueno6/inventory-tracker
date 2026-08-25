@@ -35,6 +35,7 @@ from ..core.kits import ErroComposicao
 from ..core.models import TipoMovimento, TipoProduto
 from ..services import sugestao
 from .dialogos import excluir_produto
+from .widgets.busca_produto import CampoBuscaProduto
 from .widgets.comuns import (
     CampoDinheiro,
     avisar,
@@ -104,8 +105,10 @@ class EditorComposicao(QWidget):
         lay.addWidget(self.area_sugestoes)
 
         busca = QHBoxLayout()
-        self.campo_busca = QLineEdit()
+        self.campo_busca = CampoBuscaProduto(session, ignorar={produto.id})
+        # placeholder curto: o campo tem ~600px e o texto longo era cortado no meio
         self.campo_busca.setPlaceholderText("Procurar outro item pelo nome ou código…")
+        self.campo_busca.escolhido.connect(self._adicionar)
         self.campo_busca.returnPressed.connect(self._buscar_e_adicionar)
         bt = QPushButton("Adicionar")
         bt.clicked.connect(self._buscar_e_adicionar)
@@ -138,18 +141,28 @@ class EditorComposicao(QWidget):
         self._redesenhar()
 
     def _buscar_e_adicionar(self):
+        """O Enter/'Adicionar' de quem não escolheu pela lista.
+
+        Nunca chuta: com mais de um candidato ele abre a lista em vez de entrar
+        com o primeiro que achar — "mord.mao" são dois itens, rosa e azul.
+        """
+        if self.campo_busca.escolha_destacada():
+            return   # o Enter é da lista: o item escolhido entra pelo `escolhido`
         texto = self.campo_busca.text().strip()
         if not texto:
+            self.campo_busca.abrir_lista("")
             return
-        achados = [
-            p for p in repo.buscar(self.session, texto, tipo=TipoProduto.SIMPLES)
-            if p.id != self.produto.id
-        ]
-        if not achados:
+        opcoes = self.campo_busca.opcoes(texto)
+        if not opcoes:
             avisar(self, "Não encontrei", f"Nenhum item simples com “{texto}”.")
             return
-        self._adicionar(achados[0].id)
+        unico = self.campo_busca.unico_encontrado(texto)
+        if unico is None:
+            self.campo_busca.abrir_lista(texto)
+            return
+        self._adicionar(unico.id)
         self.campo_busca.clear()
+        self.campo_busca.fechar_lista()
 
     # ---------------------------------------------------------------- desenho
 
