@@ -59,9 +59,17 @@ TITULOS = {
 
 
 def escolher_arquivo(pai) -> Path | None:
+    """Os dois arquivos do ML na mesma caixa: a planilha e o PDF de etiquetas (§2.9).
+
+    Um filtro só, com as duas extensões juntas, porque ela não precisa saber de
+    antemão qual dos dois vai usar — e importar os dois é seguro (§2.3).
+    """
     caminho, _ = QFileDialog.getOpenFileName(
-        pai, "Escolha o relatório de vendas do Mercado Livre", "",
-        "Planilhas (*.xlsx *.xls);;Todos os arquivos (*)",
+        pai, "Escolha o arquivo de vendas do Mercado Livre", "",
+        "Vendas do Mercado Livre (*.xlsx *.xls *.pdf);;"
+        "Planilha de vendas (*.xlsx *.xls);;"
+        "PDF de etiquetas do Flex (*.pdf);;"
+        "Todos os arquivos (*)",
     )
     return Path(caminho) if caminho else None
 
@@ -88,6 +96,13 @@ class TelaImportacao(QDialog):
 
         self.faixa_resumo = faixa("Lendo o arquivo…")
         self.lay.addWidget(self.faixa_resumo)
+
+        # Só aparece quando tem o que dizer sobre o arquivo em si — hoje é a
+        # etiqueta do Flex, que baixa estoque e não mexe no balanço (§2.9).
+        self.lb_sobre_arquivo = dica("")
+        self.lb_sobre_arquivo.setWordWrap(True)
+        self.lb_sobre_arquivo.setVisible(False)
+        self.lay.addWidget(self.lb_sobre_arquivo)
 
         self.abas = QTabWidget()
         self.lay.addWidget(self.abas, 1)
@@ -118,7 +133,7 @@ class TelaImportacao(QDialog):
             return
         except Exception as exc:  # noqa: BLE001
             avisar(self, "Não consegui ler este arquivo",
-                   "Algo deu errado ao abrir a planilha.", detalhe_tecnico=repr(exc))
+                   "Algo deu errado ao abrir o arquivo.", detalhe_tecnico=repr(exc))
             self.reject()
             return
         self._desenhar()
@@ -136,6 +151,16 @@ class TelaImportacao(QDialog):
         self._trocar_faixa(
             a.resumo() + periodo, "ok" if not a.por(Situacao.SEM_CADASTRO) else "alerta"
         )
+
+        recados = list(rel.avisos)
+        if a.sem_valores:
+            recados.insert(
+                0,
+                "Este é o PDF de etiquetas do Flex: ele traz as vendas, mas não "
+                "traz valores. O estoque baixa normalmente e o balanço não muda.",
+            )
+        self.lb_sobre_arquivo.setText("  ".join(recados))
+        self.lb_sobre_arquivo.setVisible(bool(recados))
 
         self.abas.clear()
         ordem = [Situacao.PRONTA, Situacao.ATENCAO, Situacao.SEM_CADASTRO,

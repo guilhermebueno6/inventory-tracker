@@ -30,7 +30,7 @@ from ..core.models import (
     VendaItem,
     normalizar_sku,
 )
-from ..importers import catalogo_csv, ml_vendas_xlsx
+from ..importers import catalogo_csv, ml_flex_pdf, ml_vendas_xlsx
 from ..importers.ml_vendas_xlsx import LinhaVenda, RelatorioML
 
 
@@ -83,6 +83,11 @@ class AnaliseVendas:
     def produtos_afetados(self) -> int:
         return len({p.id for ln in self.aplicaveis for p, _ in ln.baixas})
 
+    @property
+    def sem_valores(self) -> bool:
+        """Arquivo que baixa estoque mas não mexe no balanço — a etiqueta Flex (§2.9)."""
+        return bool(self.linhas) and not any(ln.origem.tem_financeiro for ln in self.linhas)
+
     def resumo(self) -> str:
         """A frase do topo da tela de conferência (§5.1 passo 5)."""
         n = len(self.aplicaveis)
@@ -99,6 +104,19 @@ class AnaliseVendas:
                 else "1 linha precisa de atenção"
             )
         return ". ".join(partes) + "."
+
+
+def ler_relatorio(caminho: str | Path) -> RelatorioML:
+    """Os dois formatos entram pelo mesmo funil.
+
+    A planilha de vendas (§2) não traz as vendas do Flex; a lista de etiquetas
+    em PDF (§2.9) traz. Como a chave de deduplicação é o N.º de venda e não o
+    arquivo (§2.3), ela pode importar os dois sem medo de baixar duas vezes.
+    """
+    caminho = Path(caminho)
+    if caminho.suffix.lower() == ".pdf":
+        return ml_flex_pdf.ler(caminho)
+    return ml_vendas_xlsx.ler(caminho)
 
 
 def _hash(caminho: Path) -> str:
@@ -137,7 +155,7 @@ def _casar(session: Session, linha: LinhaVenda) -> Produto | None:
 
 def analisar_vendas(session: Session, caminho: str | Path) -> AnaliseVendas:
     caminho = Path(caminho)
-    relatorio = ml_vendas_xlsx.ler(caminho)
+    relatorio = ler_relatorio(caminho)
     processadas = _ja_processadas(session)
     linhas: list[LinhaAnalise] = []
 
@@ -176,6 +194,8 @@ def analisar_vendas(session: Session, caminho: str | Path) -> AnaliseVendas:
         baixas = [(i.produto, i.quantidade) for i in itens]
         avisos = []
 
+        if lv.aviso:
+            avisos.append(lv.aviso)
         if lv.local == FULL:
             avisos.append("Saiu do estoque Full — não desconta do estoque de casa.")
         if lv.status_desconhecido:
@@ -211,6 +231,7 @@ class ResumoImportacao:
     pendentes: int
     linhas_financeiras: int = 0     # linhas novas gravadas para o balanço
     linhas_corrigidas: int = 0      # linhas que já existiam e mudaram de valor
+    sem_valores: bool = False       # veio de etiqueta do Flex: balanço intocado
 
 
 def _chave_financeira(lv: LinhaVenda) -> str:
@@ -233,6 +254,12 @@ def _gravar_financeiro(session: Session, linha: LinhaAnalise, lote_id: int) -> s
     produto = linha.produto
     chave = _chave_financeira(lv)
     if not lv.numero_venda or not chave:
+        return "ignorado"
+
+    # A etiqueta do Flex (§2.9) não traz um centavo: nem preço, nem tarifa, nem
+    # frete. Gravar zeros aqui daria uma venda com custo e receita nenhuma — um
+    # prejuízo que não existe. O estoque baixa; o balanço espera a planilha.
+    if not lv.tem_financeiro:
         return "ignorado"
 
     item = session.scalar(
@@ -283,7 +310,7 @@ def confirmar_vendas(session: Session, analise: AnaliseVendas) -> ResumoImportac
     lote = LoteImportacao(
         arquivo_nome=rel.arquivo,
         arquivo_hash=analise.hash_arquivo,
-        tipo="vendas_ml",
+        tipo=rel.tipo,
         periodo_inicio=rel.periodo_inicio,
         periodo_fim=rel.periodo_fim,
         linhas_total=len(rel.linhas),
@@ -341,6 +368,7 @@ def confirmar_vendas(session: Session, analise: AnaliseVendas) -> ResumoImportac
         pendentes=len(analise.por(Situacao.SEM_CADASTRO)),
         linhas_financeiras=novas,
         linhas_corrigidas=corrigidas,
+        sem_valores=analise.sem_valores,
     )
 
 
@@ -397,7 +425,7 @@ def importar_catalogo(
 
 def preencher_nomes(session: Session, caminho: str | Path) -> int:
     """Passo 2 da carga inicial (§5.3): o relatório do ML dá nome aos SKUs."""
-    relatorio = ml_vendas_xlsx.ler(caminho)
+    relatorio = ler_relatorio(caminho)
     preenchidos = 0
     for lv in relatorio.linhas:
         if not lv.sku or not lv.titulo:
@@ -426,7 +454,7 @@ def preencher_nomes(session: Session, caminho: str | Path) -> int:
 
 def produtos_do_relatorio(session: Session, caminho: str | Path) -> list[dict]:
     """SKUs do relatório que ainda não existem no catálogo (§2.8)."""
-    relatorio = ml_vendas_xlsx.ler(caminho)
+    relatorio = ler_relatorio(caminho)
     novos: dict[str, dict] = {}
     for lv in relatorio.linhas:
         if not lv.sku or repo.por_sku(session, lv.sku):

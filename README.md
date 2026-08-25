@@ -59,11 +59,27 @@ ruff check src tests
    Quanto maior o período do relatório, mais produtos ficam com nome.
 3. **Configurar kits que faltam** — para cada kit, escolha de que ele é montado.
    As sugestões já vêm ordenadas por semelhança de nome.
-4. **Importar vendas** — arraste o relatório do ML. Confira e confirme.
+4. **Importar vendas** — o relatório do ML. Confira e confirme.
 5. **Lançar as despesas do mês** e abrir o **Balanço**.
 
 > A ordem importa: se importar vendas com kits ainda sem composição, essas linhas
 > ficam pendentes e o trabalho precisa ser refeito.
+
+## Dois arquivos para importar vendas
+
+| Arquivo | Onde pegar | O que faz |
+|---|---|---|
+| **Planilha de vendas** (`.xlsx`) | Vendas → Exportar → Excel | Baixa o estoque **e** alimenta o balanço |
+| **Etiquetas do Flex** (`.pdf`) | Vendas → Imprimir etiquetas | Baixa **só** o estoque |
+
+A planilha do ML **não traz as vendas do Flex** — quem importa só ela nunca dá
+baixa dessas vendas. O PDF de etiquetas traz, e traz o mesmo N.º de venda: pode
+importar os dois, na ordem que quiser, quantas vezes quiser, que nada baixa duas
+vezes.
+
+O PDF não tem valores (nem preço, nem tarifa, nem frete), então ele não mexe no
+balanço — gravar zeros ali viraria um prejuízo que não existe. A tela de
+conferência avisa isso antes de você confirmar.
 
 ## O balanço: sobrou dinheiro no mês?
 
@@ -166,7 +182,7 @@ src/estoque_facil/
 │   ├── ledger.py    livro-razão: todo movimento passa por aqui
 │   ├── kits.py      disponibilidade, explosão, cascata
 │   └── db.py        SQLite (WAL), caminhos por SO
-├── importers/     leitura de arquivos externos
+├── importers/     leitura de arquivos externos (planilha do ML, catálogo, etiquetas Flex)
 ├── services/      importação, financeiro (balanço), backup, sugestão, updater
 └── ui/            PySide6
 ```
@@ -179,7 +195,9 @@ negócio é testável sem abrir janela.
 **Deduplicação por N.º de venda, não por arquivo.** O relatório do ML cobre vários
 dias e se sobrepõe entre exportações. Como cada venda já processada fica gravada,
 importar o mesmo arquivo duas vezes não faz nada — é seguro por construção. Isso
-é garantido por um índice único no banco, não por código.
+é garantido por um índice único no banco, não por código. É também o que permite
+misturar a planilha e o PDF de etiquetas sem medo: a chave é a venda, não o
+arquivo de onde ela veio.
 
 **Classificação casa × Full pela coluna `Forma de entrega`,** nunca pelo nome do
 depósito, que é texto livre.
