@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (
 
 from ..core import exclusao, kits, repo
 from ..core.models import Produto, TipoProduto
+from ..services import compras
 from . import marca
-from .dialogos import excluir_produto, reativar_produto
+from .dialogos import excluir_produto, exportar_lista_de_compras, reativar_produto
 from .tela_produto import TelaProduto
 from .widgets.comuns import (
     celula,
@@ -40,6 +41,7 @@ COR_ATENCAO = QColor(marca.CINZA)
 COR_ARQUIVADO = QColor(marca.DESABILITADO)
 
 FILTRO_ARQUIVADOS = "Arquivados"
+FILTRO_COMPRAS = "Precisa comprar"
 
 
 class TelaEstoque(QWidget):
@@ -69,7 +71,7 @@ class TelaEstoque(QWidget):
 
         self.filtro = QComboBox()
         self.filtro.addItems(
-            ["Tudo", "Só itens", "Só kits", "Precisa comprar", FILTRO_ARQUIVADOS]
+            ["Tudo", "Só itens", "Só kits", FILTRO_COMPRAS, FILTRO_ARQUIVADOS]
         )
         self.filtro.currentIndexChanged.connect(self.recarregar)
 
@@ -81,9 +83,19 @@ class TelaEstoque(QWidget):
         self.bt_reativar.clicked.connect(self.reativar_selecionado)
         self.bt_reativar.setVisible(False)
 
-        bt_ajuste = QPushButton("Perda / ajuste")
-        bt_ajuste.setToolTip("Quebrou, sumiu, virou brinde — ou contagem da prateleira")
-        bt_ajuste.clicked.connect(self.ajustar_estoque)
+        bt_ajuste = QPushButton("Movimentar estoque")
+        bt_ajuste.setToolTip(
+            "Entrada ou saída lançada à mão — quebrou, sumiu, virou brinde, "
+            "ou contagem da prateleira. Kit também pode ser lançado inteiro."
+        )
+        bt_ajuste.clicked.connect(self.movimentar_estoque)
+
+        # Só aparece no filtro em que ela faz sentido: exportar "a lista de
+        # compras" vendo o catálogo inteiro seria um botão que promete uma coisa
+        # e entrega outra.
+        self.bt_compras = QPushButton("Exportar lista de compras")
+        self.bt_compras.clicked.connect(self.exportar_compras)
+        self.bt_compras.setVisible(False)
 
         bt_novo = QPushButton("Novo produto")
         bt_novo.setObjectName("primario")
@@ -94,6 +106,7 @@ class TelaEstoque(QWidget):
         topo.addWidget(self.bt_reativar)
         topo.addWidget(self.bt_excluir)
         topo.addWidget(bt_ajuste)
+        topo.addWidget(self.bt_compras)
         topo.addWidget(bt_novo)
         lay.addLayout(topo)
 
@@ -116,6 +129,8 @@ class TelaEstoque(QWidget):
 
         self.rodape = dica("")
         lay.addWidget(self.rodape)
+
+        self._necessidades = {}
         self.recarregar()
 
     # ------------------------------------------------------------------ dados
@@ -131,8 +146,8 @@ class TelaEstoque(QWidget):
             return repo.buscar(self.session, texto, tipo=TipoProduto.SIMPLES)
         if modo == "Só kits":
             return repo.buscar(self.session, texto, tipo=TipoProduto.KIT)
-        if modo == "Precisa comprar":
-            return [p for p, _, _ in repo.abaixo_do_minimo(self.session)]
+        if modo == FILTRO_COMPRAS:
+            return [n.produto for n in self._necessidades.values()]
         if modo == FILTRO_ARQUIVADOS:
             return exclusao.arquivados(self.session, texto)
         return repo.buscar(self.session, texto)
@@ -140,8 +155,14 @@ class TelaEstoque(QWidget):
     def recarregar(self):
         arquivados = self._vendo_arquivados
         self.bt_reativar.setVisible(arquivados)
+        self.bt_compras.setVisible(self.filtro.currentText() == FILTRO_COMPRAS)
         self.bt_excluir.setText("Excluir de vez" if arquivados else "Excluir")
 
+        # Uma conta só para a linha e para o filtro: a coluna "Observação" e a
+        # lista exportada precisam concordar sobre o que "precisa comprar".
+        self._necessidades = {
+            n.produto.id: n for n in compras.lista_de_compras(self.session)
+        }
         produtos = self._produtos()
         self.tabela.setRowCount(0)
         alertas = 0
@@ -182,11 +203,13 @@ class TelaEstoque(QWidget):
                 obs = "Estoque negativo — confira"
                 item_qtd.setForeground(QBrush(COR_ALERTA))
                 alertas += 1
-            elif p.estoque_minimo and d.quantidade <= p.estoque_minimo:
-                travados = kits.kits_afetados(self.session, p) if not p.eh_kit else []
-                obs = "Precisa comprar"
-                if travados:
-                    obs += f" — trava {len(travados)} kit(s)"
+            elif p.id in self._necessidades:
+                # O mínimo do item é só metade da conta: o que os kits reservam
+                # entra junto, e é por isso que 15 em estoque pode ser pouco.
+                n = self._necessidades[p.id]
+                obs = f"Comprar {n.faltam}" if n.faltam else "No limite do mínimo"
+                if n.trava_kits:
+                    obs += f" — trava {len(n.trava_kits)} kit(s)"
                 item_qtd.setForeground(QBrush(COR_ALERTA))
                 alertas += 1
 
@@ -251,10 +274,13 @@ class TelaEstoque(QWidget):
         if reativar_produto(self, self.session, p):
             self.recarregar()
 
-    def ajustar_estoque(self):
-        """Já abre no produto selecionado, se houver um."""
-        from .dialogos import DialogoAjuste
+    def movimentar_estoque(self):
+        """Já abre no produto selecionado, se houver um — inclusive se for kit."""
+        from .dialogos import DialogoMovimento
 
         selecionado = self.produto_selecionado()
-        if DialogoAjuste(self.session, selecionado, self).exec():
+        if DialogoMovimento(self.session, selecionado, self).exec():
             self.recarregar()
+
+    def exportar_compras(self):
+        exportar_lista_de_compras(self, self.session)

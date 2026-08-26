@@ -27,16 +27,18 @@ from PySide6.QtWidgets import (
 )
 
 from ..core import kits, ledger, repo
-from ..services import backup, financeiro, importacao
+from ..services import backup, compras, financeiro, importacao
 from ..version import APP_NAME, __version__
 from . import marca
 from .atualizacao import DialogoAtualizacao, VerificadorDeVersao
 from .dialogos import (
-    DialogoAjuste,
     DialogoDespesa,
     DialogoDespesas,
     DialogoEntrada,
     DialogoImportacoes,
+    DialogoMovimentacoes,
+    DialogoMovimento,
+    exportar_lista_de_compras,
 )
 from .tela_balanco import TelaBalanco
 from .tela_estoque import TelaEstoque
@@ -235,7 +237,7 @@ class TelaInicial(QWidget):
     def recarregar(self):
         session = self.janela.session
         pendentes = kits.kits_sem_composicao(session)
-        alertas = repo.abaixo_do_minimo(session)
+        alertas = compras.lista_de_compras(session)
         contagem = repo.contar(session)
 
         if contagem["total"] == 0:
@@ -250,11 +252,11 @@ class TelaInicial(QWidget):
                 "alerta",
             )
         elif alertas:
-            travados = sum(len(k) for _p, _q, k in alertas)
+            travados = sum(len(n.trava_kits) for n in alertas)
             texto = f"{len(alertas)} itens estão acabando"
             if travados:
                 texto += f" — isso trava {travados} kit(s)"
-            texto += "."
+            texto += ". Ferramentas → Exportar lista de compras."
             tipo = "alerta"
         else:
             texto, tipo = ("Tudo em ordem. Nenhum item abaixo do mínimo.", "ok")
@@ -336,7 +338,10 @@ class JanelaPrincipal(QMainWindow):
         dinheiro.addAction("Ver despesas…", self.abrir_despesas)
 
         ferramentas = self.menuBar().addMenu("Ferramentas")
-        ferramentas.addAction("Ajuste de estoque (perda, quebra)…", self.abrir_ajuste)
+        ferramentas.addAction("Movimentar estoque (perda, quebra, kit)…", self.abrir_ajuste)
+        ferramentas.addAction("Ver movimentações do estoque…", self.abrir_movimentacoes)
+        ferramentas.addSeparator()
+        ferramentas.addAction("Exportar lista de compras (CSV)…", self.exportar_compras)
         ferramentas.addAction("Conferir estoque (recalcular)", self.recalcular)
 
         ajuda = self.menuBar().addMenu("Ajuda")
@@ -399,9 +404,15 @@ class JanelaPrincipal(QMainWindow):
             informar(self, "Sem produtos ainda",
                      "Importe seu catálogo primeiro, em Arquivo → Importar catálogo.")
             return
-        DialogoAjuste(self.session, None, self).exec()
+        DialogoMovimento(self.session, None, self).exec()
         self._recarregar_inicial()
         self.estoque.recarregar()
+
+    def abrir_movimentacoes(self):
+        DialogoMovimentacoes(self.session, self).exec()
+
+    def exportar_compras(self):
+        exportar_lista_de_compras(self, self.session)
 
     def lancar_despesa(self):
         if DialogoDespesa(self.session, self).exec():

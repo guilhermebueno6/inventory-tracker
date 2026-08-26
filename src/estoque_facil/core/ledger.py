@@ -14,15 +14,15 @@ Correções pontuais continuam sendo novos movimentos de ajuste, nunca edição.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .db import local_id
-from .kits import explodir
+from .kits import ErroComposicao, explodir
 from .models import (
     CASA,
     LoteImportacao,
@@ -44,6 +44,26 @@ class ErroEstoque(Exception):
 class ResultadoBaixa:
     movimentos: list[Movimento]
     ignorados: int = 0          # já processados antes (idempotência)
+
+
+@dataclass
+class ResultadoManual:
+    """O que uma movimentação manual produziu.
+
+    É uma LISTA de movimentos porque kit não tem estoque próprio: mexer em 2
+    kits mexe em um componente de cada vez, e quem chamou precisa mostrar o
+    efeito inteiro — não só o primeiro.
+    """
+
+    produto: Produto            # o que ela escolheu — pode ser um kit
+    unidades: int               # quantas unidades DAQUELE produto
+    motivo: str                 # rótulo do motivo, já em português
+    movimentos: list[Movimento] = field(default_factory=list)
+
+    @property
+    def nada_mudou(self) -> bool:
+        """Contagem que bateu com o sistema: motivo válido, diferença nenhuma."""
+        return not self.movimentos
 
 
 def _saldo_row(session: Session, produto_id: int, lid: int) -> Saldo:
@@ -255,7 +275,7 @@ MOTIVOS_AJUSTE: dict[str, tuple[str, str, str]] = {
 }
 
 
-def ajuste_manual(
+def movimento_manual(
     session: Session,
     produto: Produto,
     motivo: str,
@@ -263,10 +283,17 @@ def ajuste_manual(
     *,
     descricao: str = "",
     local_codigo: str = CASA,
-) -> Movimento | None:
-    """Correção de estoque feita à mão — perda, quebra, brinde ou contagem (§5.5).
+) -> ResultadoManual:
+    """Entrada ou saída lançada à mão, com motivo — §5.5. Aceita KIT.
 
-    Devolve None quando não houve diferença (contagem que bate com o sistema).
+    Dar baixa de um kit à mão era ir item por item lembrando a composição, e
+    errar a proporção do combo. Aqui o kit é explodido nos componentes: 2 kits
+    de 1 item A + 1 item B viram 2 movimentos, um de −2 A e outro de −2 B,
+    TODOS com o mesmo motivo e apontando para o kit que os originou.
+
+    O motivo é obrigatório e é ele que decide o tipo do movimento: perda custa
+    no balanço, ajuste e contagem não (§5.5). É também o que fica gravado na
+    observação, e é por ele que a movimentação é auditada depois.
     """
     if motivo not in MOTIVOS_AJUSTE:
         raise ErroEstoque(f"Motivo de ajuste desconhecido: {motivo}.")
@@ -277,22 +304,69 @@ def ajuste_manual(
     if modo != "exato" and quantidade == 0:
         raise ErroEstoque("Informe quantas unidades.")
 
-    observacao = f"{rotulo}: {descricao.strip()}" if descricao.strip() else rotulo
+    detalhe = (descricao or "").strip()
+    observacao = f"{rotulo}: {detalhe}" if detalhe else rotulo
+
+    if produto.eh_kit:
+        # Contagem de kit não existe: o que está na prateleira são os itens.
+        if modo == "exato":
+            raise ErroEstoque(
+                f"{produto.rotulo} é um kit e não fica na prateleira para ser contado. "
+                "Conte os itens que o compõem."
+            )
+        try:
+            itens = explodir(session, produto, quantidade)
+        except ErroComposicao as exc:
+            raise ErroEstoque(str(exc)) from exc
+
+        sinal = 1 if modo == "entrada" else -1
+        movs = []
+        for item in itens:
+            m = registrar(
+                session, item.produto, sinal * item.quantidade, tipo,
+                local_codigo=local_codigo, observacao=observacao,
+                produto_vendido=produto,
+            )
+            if m is not None:
+                movs.append(m)
+        return ResultadoManual(produto, quantidade, rotulo, movs)
 
     if modo == "exato":
         atual = saldo_de(session, produto, local_codigo)
         if quantidade == atual:
-            return None
-        return ajustar(
+            return ResultadoManual(produto, quantidade, rotulo, [])
+        mov = ajustar(
             session, produto, quantidade, local_codigo=local_codigo, tipo=tipo,
             observacao=f"{observacao} (de {atual} para {quantidade})",
         )
+        return ResultadoManual(produto, quantidade, rotulo, [mov] if mov else [])
 
     delta = quantidade if modo == "entrada" else -quantidade
-    return registrar(
+    mov = registrar(
         session, produto, delta, tipo,
         local_codigo=local_codigo, observacao=observacao,
     )
+    return ResultadoManual(produto, quantidade, rotulo, [mov] if mov else [])
+
+
+def ajuste_manual(
+    session: Session,
+    produto: Produto,
+    motivo: str,
+    quantidade: int,
+    *,
+    descricao: str = "",
+    local_codigo: str = CASA,
+) -> Movimento | None:
+    """Atalho de `movimento_manual` para produto simples: devolve o único movimento.
+
+    Devolve None quando não houve diferença (contagem que bate com o sistema).
+    """
+    resultado = movimento_manual(
+        session, produto, motivo, quantidade,
+        descricao=descricao, local_codigo=local_codigo,
+    )
+    return resultado.movimentos[0] if resultado.movimentos else None
 
 
 def perdas_do_periodo(
@@ -384,14 +458,58 @@ def verificar_invariante(session: Session) -> list[str]:
 
 
 def historico(session: Session, produto: Produto, limite: int = 200) -> list[Movimento]:
+    """Movimentos de um produto.
+
+    Kit não tem movimento próprio — o que ele tem são os movimentos que ELE
+    causou nos componentes. Perguntar pelo `produto_id` de um kit devolveria
+    sempre lista vazia, e a baixa de kit que ela acabou de lançar pareceria
+    não ter acontecido.
+    """
+    alvo = (
+        Movimento.produto_vendido_id == produto.id if produto.eh_kit
+        else Movimento.produto_id == produto.id
+    )
     return list(
         session.scalars(
             select(Movimento)
-            .where(Movimento.produto_id == produto.id)
+            .where(alvo)
             .order_by(Movimento.criado_em.desc(), Movimento.id.desc())
             .limit(limite)
         ).all()
     )
+
+
+def movimentacoes(
+    session: Session,
+    *,
+    texto: str = "",
+    apenas_manuais: bool = False,
+    limite: int = 300,
+) -> list[Movimento]:
+    """O livro-razão inteiro, do mais novo para o mais velho — a tela de auditoria.
+
+    A busca casa nome e código do produto e também a OBSERVAÇÃO, que é onde o
+    motivo do ajuste manual fica gravado: procurar por "brinde" acha as saídas
+    lançadas com esse motivo.
+    """
+    q = (
+        select(Movimento)
+        .join(Produto, Movimento.produto_id == Produto.id)
+        .order_by(Movimento.criado_em.desc(), Movimento.id.desc())
+    )
+    if apenas_manuais:
+        q = q.where(Movimento.origem == OrigemMovimento.MANUAL)
+    texto = (texto or "").strip().lower()
+    if texto:
+        alvo = f"%{texto}%"
+        q = q.where(
+            or_(
+                func.lower(Produto.nome).like(alvo),
+                Produto.sku_norm.like(alvo),
+                func.lower(func.coalesce(Movimento.observacao, "")).like(alvo),
+            )
+        )
+    return list(session.scalars(q.limit(limite)).all())
 
 
 def descrever(mov: Movimento) -> str:
@@ -406,10 +524,14 @@ def descrever(mov: Movimento) -> str:
         TipoMovimento.TRANSFERENCIA_SAIDA: "Enviado para o Full",
         TipoMovimento.TRANSFERENCIA_ENTRADA: "Recebido do Full",
         TipoMovimento.CANCELAMENTO: "Cancelamento",
+        TipoMovimento.PERDA: "Perda",
     }
     txt = rotulos.get(mov.tipo, mov.tipo)
     if mov.produto_vendido is not None and mov.produto_vendido_id != mov.produto_id:
-        txt += f" — saiu por {mov.produto_vendido.rotulo}"
+        # O mesmo campo serve à venda e à movimentação manual de kit, e as duas
+        # andam nos dois sentidos: "entrou por" quando o kit devolveu unidades.
+        verbo = "saiu" if mov.quantidade < 0 else "entrou"
+        txt += f" — {verbo} por {mov.produto_vendido.rotulo}"
     if mov.referencia_externa:
         txt += f" (venda {mov.referencia_externa})"
     return txt
