@@ -490,6 +490,18 @@ Kits aparecem com **"Dá para montar: 6"** no lugar da quantidade, com ícone di
 
 Um item comprado destrava vários anúncios. É a informação de compra mais valiosa do app, e é impossível de obter na mão com 195 itens e 75 kits.
 
+**A lista de compras (CSV).** O mínimo do item é só metade da conta. O mesmo item está reservado nos kits, e **o mínimo do kit é uma demanda sobre cada componente**:
+
+```
+precisa ter(item) = minimo(item) + Σ  minimo(kit) × quantidade por kit
+```
+
+Com mínimo 10 no item e mínimo 10 num kit que usa 1 unidade dele, 15 em estoque **já é pouco**: dá para segurar o item ou o kit, não os dois. Entram na lista os itens **iguais ou abaixo** do que precisam ter, mais os de estoque negativo (já saiu mais do que existia). Kit nunca entra na lista — quem se compra é o componente.
+
+O CSV traz, por item: o que tem hoje, o mínimo próprio, o quanto os kits reservam, o alvo, quanto comprar, custo estimado, fornecedor e **a conta escrita por extenso**. Vale a mesma regra do §5.2.4: sugerir sempre, decidir nunca — o app diz o que a conta manda comprar, ela decide o que entra no carrinho.
+
+Consequência de projeto: `estoque_minimo` num kit não vira alerta de estoque (kit não tem estoque — §4.2); vira **demanda** sobre a composição. É a única coisa que o campo significa num kit.
+
 ### 5.2.5 Regras invioláveis
 
 - Kit **não tem estoque próprio**. Nunca. Ajuste manual em kit é recusado com explicação.
@@ -580,6 +592,23 @@ Junto vem o ajuste avulso, para o que sai sem venda. O **motivo não é enfeite*
 | Contei a prateleira | `inventario` | vai ao número exato | não |
 
 Perda é tipo próprio, e não `ajuste` genérico, exatamente para o balanço poder dizer *"R$ 84,00 perdidos em quebra este mês"*. A perda é valorizada pelo **custo atual** do produto — ela não passa por venda, então não existe fotografia de custo para ela.
+
+#### 5.5.1 Movimentação manual de KIT
+
+Kit também é lançado por aqui, inteiro. Dar baixa de um kit era abrir componente por componente e lembrar a proporção de cada um — o combo leva 2 embalagens, e era ali que errava.
+
+> Kit X tem 1 item A e 1 item B. Baixa de 2 kits X, motivo "sumiu / não achei".
+> → 2 movimentos: −2 de A e −2 de B, **os dois com o mesmo motivo**, e os dois com `produto_vendido = Kit X`.
+
+Regras:
+
+- Vale nos dois sentidos: entrada e saída. A proporção sai da composição.
+- O motivo escolhido e o detalhe digitado ficam gravados na observação de **cada** movimento gerado. É o que torna a baixa de kit auditável depois, e é por isso que o motivo é obrigatório neste caminho.
+- **Contagem de prateleira não vale para kit**: kit não fica na prateleira, o que está lá são os itens. O motivo é recusado com explicação.
+- Kit sem composição recusa a movimentação, pela mesma razão da venda (§5.1).
+- Nada disso viola o §4.2: o kit continua sem saldo próprio — quem recebe movimento é sempre o componente.
+
+A tela **Ver movimentações do estoque** lista o livro-razão inteiro, do mais novo para o mais antigo, com busca por produto **ou pelo motivo**. É a auditoria: até aqui só dava para ver movimento abrindo produto por produto.
 
 ### 5.6 Cadastro rápido
 

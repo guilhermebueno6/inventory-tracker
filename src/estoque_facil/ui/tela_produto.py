@@ -469,6 +469,12 @@ class TelaProduto(QDialog):
             self.f_custo.setToolTip(
                 "O custo do kit é usado para conferir se a composição está completa."
             )
+            # O mínimo do kit não vira alerta de estoque (kit não tem estoque):
+            # ele vira DEMANDA na lista de compras, sobre cada item da composição.
+            self.f_minimo.setToolTip(
+                "Quantos kits você quer conseguir montar a qualquer momento.\n"
+                "A lista de compras soma isso ao mínimo de cada item da composição."
+            )
 
     # -------------------------------------------------------------- excluir
 

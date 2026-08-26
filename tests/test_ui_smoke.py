@@ -364,15 +364,15 @@ def test_dialogo_de_despesa_recusa_sem_descricao(app, loja, session):
     assert financeiro.listar_despesas(session) == []
 
 
-def test_dialogo_de_ajuste_registra_perda(app, loja, session):
+def test_dialogo_de_movimento_registra_perda(app, loja, session):
     from estoque_facil.core import ledger, repo
-    from estoque_facil.ui.dialogos import DialogoAjuste
+    from estoque_facil.ui.dialogos import DialogoMovimento
 
     produto = repo.por_sku(session, "mord.mao.rosa")
     ledger.entrada_compra(session, produto, 10)
     session.commit()
 
-    d = DialogoAjuste(session, produto)
+    d = DialogoMovimento(session, produto)
     assert d.combo.currentData() == produto.id, "abre já no produto selecionado"
     d.motivo.setCurrentIndex(0)                     # "Quebrou ou estragou"
     d.qtd.setValue(3)
@@ -381,6 +381,89 @@ def test_dialogo_de_ajuste_registra_perda(app, loja, session):
     d._salvar()
 
     assert ledger.saldo_de(session, produto) == 7
+
+
+def test_dialogo_de_movimento_da_baixa_no_kit_inteiro(app, loja, session):
+    """O caso que motivou a tela: dar baixa de kit sem abrir item por item."""
+    from estoque_facil.core import ledger, repo
+    from estoque_facil.ui.dialogos import DialogoMovimento
+
+    kit = repo.por_sku(session, "KIT.MAOPE.ROSA")
+    mao = repo.por_sku(session, "mord.mao.rosa")
+    pe = repo.por_sku(session, "mord.pe.rosa")
+    for item in (mao, pe):
+        ledger.entrada_compra(session, item, 10)
+    session.commit()
+
+    d = DialogoMovimento(session, kit)
+    assert d.combo.currentData() == kit.id
+    d.motivo.setCurrentIndex(1)                     # "Sumiu / não achei"
+    d.qtd.setValue(2)
+    d.descricao.setText("perdi na mudança")
+    assert "é um kit" in d.lb_efeito.text()
+    d._salvar()
+
+    assert ledger.saldo_de(session, mao) == 8
+    assert ledger.saldo_de(session, pe) == 8
+
+
+def test_dialogo_de_movimento_nao_deixa_contar_kit(app, loja, session):
+    """Contagem de prateleira em kit não existe: kit não fica na prateleira."""
+    from estoque_facil.core import repo
+    from estoque_facil.ui.dialogos import DialogoMovimento
+
+    kit = repo.por_sku(session, "KIT.MAOPE.ROSA")
+    d = DialogoMovimento(session, kit)
+    modelo = d.motivo.model()
+    contagem = d.motivo.findData("contagem")
+    assert not modelo.item(contagem).isEnabled()
+
+
+def test_tela_de_movimentacoes_lista_o_motivo(app, loja, session):
+    from estoque_facil.core import ledger, repo
+    from estoque_facil.ui.dialogos import DialogoMovimentacoes
+
+    produto = repo.por_sku(session, "mord.mao.rosa")
+    ledger.entrada_compra(session, produto, 10)
+    ledger.movimento_manual(session, produto, "brinde", 2, descricao="amostra para cliente")
+    session.commit()
+
+    d = DialogoMovimentacoes(session)
+    motivos = [
+        d.tabela.item(i, 5).text() for i in range(d.tabela.rowCount())
+    ]
+    assert any("amostra para cliente" in m for m in motivos)
+
+    d.busca.setText("brinde")
+    d.recarregar()
+    assert d.tabela.rowCount() == 1
+
+
+def test_exportar_lista_de_compras_pela_tela_de_estoque(app, loja, session, tmp_path,
+                                                        monkeypatch):
+    from estoque_facil.core import ledger, repo
+    from estoque_facil.ui import dialogos
+    from estoque_facil.ui.tela_estoque import FILTRO_COMPRAS, TelaEstoque
+
+    produto = repo.por_sku(session, "mord.mao.rosa")
+    produto.estoque_minimo = 10
+    ledger.entrada_compra(session, produto, 4)
+    session.commit()
+
+    destino = tmp_path / "compras.csv"
+    monkeypatch.setattr(
+        dialogos.QFileDialog, "getSaveFileName",
+        staticmethod(lambda *a, **k: (str(destino), "")),
+    )
+
+    tela = TelaEstoque(session)
+    tela.filtro.setCurrentText(FILTRO_COMPRAS)
+    assert tela.bt_compras.isVisibleTo(tela), "o botão só aparece neste filtro"
+    tela.exportar_compras()
+
+    conteudo = destino.read_text(encoding="utf-8-sig")
+    assert "Lista de compras" in conteudo
+    assert "mord.mao.rosa" in conteudo
 
 
 # --------------------------------------------------------------------- layout

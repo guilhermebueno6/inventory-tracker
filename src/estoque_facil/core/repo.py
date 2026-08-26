@@ -4,7 +4,6 @@ from __future__ import annotations
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from .kits import disponivel
 from .models import Produto, TipoProduto, VinculoML, normalizar_sku
 
 
@@ -111,23 +110,3 @@ def contar(session: Session) -> dict[str, int]:
         or 0
     )
     return {"total": int(total), "kits": int(kits), "simples": int(total) - int(kits)}
-
-
-def abaixo_do_minimo(session: Session) -> list[tuple[Produto, int, list[Produto]]]:
-    """Produtos em alerta, com os kits que cada um trava (§5.2.4)."""
-    from .kits import kits_afetados
-
-    saida = []
-    produtos = session.scalars(
-        select(Produto).where(
-            Produto.ativo.is_(True),
-            Produto.tipo == TipoProduto.SIMPLES,
-            Produto.estoque_minimo > 0,
-        )
-    ).all()
-    for p in produtos:
-        d = disponivel(session, p)
-        if d.quantidade <= p.estoque_minimo:
-            saida.append((p, d.quantidade, kits_afetados(session, p)))
-    saida.sort(key=lambda t: (t[1] - 0, -len(t[2])))
-    return saida

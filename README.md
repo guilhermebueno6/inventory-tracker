@@ -12,7 +12,9 @@ O escopo completo, com as decisões e o porquê de cada uma, está em
 2. **Dar baixa das vendas** importando o relatório que o Mercado Livre já gera.
 3. **Kits que compartilham componentes** — o problema que planilha nenhuma resolve.
 4. **Saber se sobrou dinheiro no mês** — vendas, tarifas do ML, custo, perdas e despesas.
-5. **Não perder os dados**, com backup automático em CSV.
+5. **Saber o que comprar**, contando o que os kits reservam — não só o mínimo do item.
+6. **Movimentar o estoque à mão com motivo**, inclusive kits inteiros, para auditar depois.
+7. **Não perder os dados**, com backup automático em CSV.
 
 ### A ideia central: kit não tem estoque
 
@@ -46,7 +48,7 @@ python -m estoque_facil
 Testes:
 
 ```bash
-pytest -q                      # 138 testes
+pytest -q                      # 225 testes
 QT_QPA_PLATFORM=offscreen pytest -q   # em servidor sem tela
 ruff check src tests
 ```
@@ -106,12 +108,63 @@ Três coisas que essa parte faz questão de acertar:
 
 **Perda não é ajuste.** Quebrou, sumiu ou virou brinde entra como `perda` e **custa**
 no balanço; contagem de prateleira entra como `inventario` e não custa nada. É a mesma
-tela (**Estoque → Perda / ajuste**), e o motivo escolhido decide o resto.
+tela (**Estoque → Movimentar estoque**), e o motivo escolhido decide o resto.
 
 Compra de mercadoria **não** é despesa: ela vira custo quando o produto vende. Lançá-la
 como despesa jogaria o mês da reposição no prejuízo e o mês da venda num lucro irreal.
 
 O período inteiro sai em CSV (**Balanço → Exportar planilha**) para mandar ao contador.
+
+## A lista de compras: o mínimo do item é só metade da conta
+
+O alerta de "está acabando" olhava só o mínimo do item. Só que o mesmo item também
+está reservado nos kits, e **o mínimo do kit é uma demanda sobre cada componente**:
+
+```
+precisa ter(item) = mínimo(item) + Σ  mínimo(kit) × quantidade por kit
+```
+
+Com mínimo 10 no item e mínimo 10 num kit que usa 1 unidade dele, **15 em estoque já é
+pouco**: dá para segurar o item ou o kit, não os dois. A lista pede 5 e mostra a conta.
+
+E como um item entra em vários kits, a soma é onde a conta na mão desiste: `mord.mao.rosa`
+está no `KIT.MAOPE.ROSA` e no `kit.combo` — nenhum dos dois mínimos sozinho passa das 14
+unidades, mas a soma passa.
+
+Entram na lista os itens **iguais ou abaixo** do que precisam ter, mais qualquer item com
+estoque negativo (já saiu mais do que existia: é compra pendente por definição). Kit nunca
+entra — quem se compra é o componente, e é ele que vai para o carrinho.
+
+O CSV traz, por item: o que tem hoje, o mínimo próprio, o quanto os kits reservam, o alvo,
+quanto comprar, o custo estimado, o fornecedor e **por quê** — a conta escrita por extenso,
+que é o que ela confere antes de comprar.
+
+**Estoque → filtro "Precisa comprar" → Exportar lista de compras**, ou
+**Ferramentas → Exportar lista de compras (CSV)**.
+
+## Movimentar estoque à mão — inclusive kits
+
+Dar baixa de um kit era abrir componente por componente e lembrar a proporção de cada um
+(o combo leva 2 embalagens, e era ali que errava). Agora o kit é lançado inteiro:
+
+> Kit X tem 1 item A e 1 item B. Baixa de 2 kits X, motivo "sumiu / não achei".
+> → 2 movimentos: −2 de A e −2 de B, **os dois com o mesmo motivo**, e os dois
+> apontando para o kit que os originou.
+
+Vale nos dois sentidos, e a proporção sai da composição — 3 unidades de um kit que leva
+2 embalagens tiram 6 embalagens, não 3.
+
+**O motivo não é enfeite**: ele decide o tipo do movimento, e o tipo decide se aquilo
+custa dinheiro no balanço (perda custa, ajuste e contagem não — §5.5 do escopo). O motivo
+escolhido e o detalhe digitado ficam gravados na observação de **cada** movimento gerado,
+que é o que torna a baixa de kit auditável depois.
+
+Contagem de prateleira é a única que não vale para kit: kit não fica na prateleira, o que
+está lá são os itens. A tela desabilita esse motivo quando um kit é escolhido.
+
+**Ferramentas → Ver movimentações do estoque** lista tudo o que entrou e saiu, do mais
+novo para o mais antigo, com filtro por produto **ou pelo motivo** — procurar por "brinde"
+acha as saídas lançadas com esse motivo.
 
 ## Atualizar sem perder o estoque
 
@@ -183,7 +236,8 @@ src/estoque_facil/
 │   ├── kits.py      disponibilidade, explosão, cascata
 │   └── db.py        SQLite (WAL), caminhos por SO
 ├── importers/     leitura de arquivos externos (planilha do ML, catálogo, etiquetas Flex)
-├── services/      importação, financeiro (balanço), backup, sugestão, updater
+├── services/      importação, financeiro (balanço), compras (lista de compras),
+│                  backup, sugestão, updater
 └── ui/            PySide6
 ```
 

@@ -100,3 +100,106 @@ def test_recalcular_saldos_reconstroi_o_cache(session, com_estoque):
 def test_movimento_zero_e_recusado(session, com_estoque):
     with pytest.raises(ledger.ErroEstoque):
         ledger.registrar(session, com_estoque["mord.mao.rosa"], 0, TipoMovimento.AJUSTE)
+
+
+# ------------------------------------------------- movimentação manual (§5.5)
+#
+# Dar baixa de um kit à mão era abrir componente por componente e lembrar a
+# proporção de cada um — o combo leva 2 embalagens, e era ali que errava.
+
+
+def test_baixa_manual_de_kit_gera_um_movimento_por_componente(session, com_estoque):
+    r = ledger.movimento_manual(
+        session, com_estoque["KIT.MAOPE.ROSA"], "perda", 2, descricao="perdi um kit"
+    )
+    assert len(r.movimentos) == 2
+    assert ledger.saldo_de(session, com_estoque["mord.mao.rosa"]) == 12
+    assert ledger.saldo_de(session, com_estoque["mord.pe.rosa"]) == 4
+    assert ledger.verificar_invariante(session) == []
+
+
+def test_baixa_manual_de_kit_repete_o_mesmo_motivo_em_todos(session, com_estoque):
+    """É o que permite auditar depois: um motivo, N linhas, todas ligadas ao kit."""
+    r = ledger.movimento_manual(
+        session, com_estoque["KIT.MAOPE.ROSA"], "perda", 2, descricao="perdi um kit"
+    )
+    assert {m.observacao for m in r.movimentos} == {"Sumiu / não achei: perdi um kit"}
+    assert {m.produto_vendido.sku for m in r.movimentos} == {"KIT.MAOPE.ROSA"}
+    assert {m.tipo for m in r.movimentos} == {TipoMovimento.PERDA}
+
+
+def test_baixa_manual_de_kit_respeita_a_proporcao(session, com_estoque):
+    """`kit.combo` leva 2 embalagens: 3 kits são 6 embalagens, não 3."""
+    ledger.movimento_manual(session, com_estoque["kit.combo"], "quebra", 3)
+    assert ledger.saldo_de(session, com_estoque["embalagem"]) == 74      # 80 − 6
+    assert ledger.saldo_de(session, com_estoque["mord.mao.rosa"]) == 11  # 14 − 3
+
+
+def test_entrada_manual_de_kit_soma_nos_componentes(session, com_estoque):
+    r = ledger.movimento_manual(
+        session, com_estoque["KIT.MAOPE.ROSA"], "sobra", 2, descricao="achei na caixa"
+    )
+    assert ledger.saldo_de(session, com_estoque["mord.mao.rosa"]) == 16
+    assert ledger.saldo_de(session, com_estoque["mord.pe.rosa"]) == 8
+    assert "entrou por KIT.MAOPE.ROSA" in ledger.descrever(r.movimentos[0])
+
+
+def test_contagem_de_prateleira_nao_vale_para_kit(session, com_estoque):
+    """Kit não fica na prateleira — contar o kit não quer dizer nada."""
+    with pytest.raises(ledger.ErroEstoque, match="não fica na prateleira"):
+        ledger.movimento_manual(session, com_estoque["KIT.MAOPE.ROSA"], "contagem", 3)
+
+
+def test_kit_sem_composicao_recusa_movimento_manual(session, catalogo):
+    from estoque_facil.core import kits as mod_kits
+    from estoque_facil.core.models import TipoProduto
+    from estoque_facil.core.repo import criar_produto
+
+    vazio = criar_produto(session, "kit.vazio", tipo=TipoProduto.KIT)
+    session.commit()
+    assert mod_kits.componentes_de(session, vazio) == []
+
+    with pytest.raises(ledger.ErroEstoque, match="composição"):
+        ledger.movimento_manual(session, vazio, "perda", 1)
+
+
+def test_movimento_de_kit_aparece_no_historico_do_kit(session, com_estoque):
+    """Sem isto a baixa que ela acabou de lançar sumiria da tela do kit."""
+    kit = com_estoque["KIT.MAOPE.ROSA"]
+    ledger.movimento_manual(session, kit, "brinde", 1, descricao="sorteio")
+
+    movs = ledger.historico(session, kit)
+    assert len(movs) == 2
+    assert {m.produto.sku for m in movs} == {"mord.mao.rosa", "mord.pe.rosa"}
+
+
+def test_perda_de_kit_custa_no_balanco(session, com_estoque):
+    """2 kits perdidos = 2 × (6,75 + 6,75). Perda é tipo próprio justamente por isto."""
+    from datetime import datetime, timedelta
+
+    ledger.movimento_manual(session, com_estoque["KIT.MAOPE.ROSA"], "perda", 2)
+    session.commit()
+
+    agora = datetime.now()
+    perdas = ledger.perdas_do_periodo(
+        session, agora - timedelta(days=1), agora + timedelta(days=1)
+    )
+    assert round(sum(custo for _mov, custo in perdas), 2) == 27.00
+
+
+def test_movimentacoes_procura_pelo_motivo(session, com_estoque):
+    ledger.movimento_manual(
+        session, com_estoque["manta.rosa"], "brinde", 1, descricao="amostra"
+    )
+    ledger.movimento_manual(session, com_estoque["manta.rosa"], "quebra", 1)
+
+    ledger.aplicar_venda(session, com_estoque["manta.rosa"], 1, referencia_externa="V1")
+
+    assert len(ledger.movimentacoes(session, texto="amostra")) == 1
+    assert len(ledger.movimentacoes(session, texto="manta")) == 4     # 1 entrada + 3 saídas
+
+    # a venda veio de importação; as entradas do fixture, de `entrada_compra`,
+    # que é manual como os ajustes
+    manuais = ledger.movimentacoes(session, apenas_manuais=True)
+    assert len(manuais) == 8
+    assert all(m.tipo != TipoMovimento.VENDA for m in manuais)

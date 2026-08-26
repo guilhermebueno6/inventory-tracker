@@ -1,14 +1,17 @@
-"""Diálogos curtos: entrada de mercadoria, ajuste de estoque, despesas,
-desfazer importação e excluir produto."""
+"""Diálogos curtos: entrada de mercadoria, movimentação manual de estoque,
+histórico de movimentações, despesas, desfazer importação e excluir produto."""
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
@@ -30,11 +33,12 @@ from ..core.models import (
     StatusLote,
     TipoProduto,
 )
-from ..services import financeiro
+from ..services import compras, financeiro
 from .widgets.comuns import (
     CampoDinheiro,
     avisar,
     celula,
+    celula_numero,
     configurar_colunas,
     confirmar,
     dica,
@@ -307,34 +311,84 @@ def reativar_produto(pai, session, produto) -> bool:
     informar(pai, "Pronto", f"{rotulo} está de volta no catálogo.")
     return True
   
-class DialogoAjuste(QDialog):
-    """Ajuste manual de estoque: perda, quebra, brinde ou contagem — §5.5.
+# ---------------------------------------------------------- lista de compras
+#
+# Fica aqui pelo mesmo motivo de `excluir_produto`: a tela de estoque e o menu
+# chamam o MESMO fluxo, e uma lista exportada por um caminho com regra
+# diferente da do outro seria pior do que não ter o botão.
 
-    O motivo não é enfeite: perda tem custo e entra no balanço, contagem não.
+
+def exportar_lista_de_compras(pai, session) -> bool:
+    """Salva a lista de compras em CSV. Devolve True quando o arquivo saiu."""
+    linhas = compras.lista_de_compras(session)
+    if not linhas:
+        informar(
+            pai, "Nada para comprar",
+            "Nenhum item está no limite do mínimo — nem o dos itens, nem o que "
+            "os kits reservam.\n\nSe você espera ver algo aqui, confira se os "
+            "mínimos estão preenchidos na tela do produto.",
+        )
+        return False
+
+    sugerido = f"lista-de-compras-{datetime.now():%Y-%m-%d}.csv"
+    destino, _ = QFileDialog.getSaveFileName(
+        pai, "Onde salvar a lista de compras", sugerido, "Planilha (*.csv)"
+    )
+    if not destino:
+        return False
+    try:
+        caminho, quantos = compras.exportar_csv(session, Path(destino))
+    except Exception as exc:  # noqa: BLE001
+        avisar(pai, "Não consegui salvar a lista", str(exc), detalhe_tecnico=repr(exc))
+        return False
+
+    total = compras.total_estimado(linhas)
+    informar(
+        pai, "Lista pronta",
+        f"{quantos} item(ns) para comprar, {moeda(total)} estimados.\n\n"
+        f"Salvo em:\n{caminho}\n\nEle abre direto no Excel.",
+    )
+    return True
+
+
+class DialogoMovimento(QDialog):
+    """Movimentação manual de estoque: entra, sai ou vira contagem — §5.5.
+
+    Duas coisas que esta tela resolve e que antes eram trabalho manual:
+
+    1. **Kit também entra aqui.** Perder 2 kits era abrir cada componente e
+       lembrar a proporção de cada um. Agora ela escolhe o kit, e o app lança um
+       movimento por componente, todos com o MESMO motivo.
+    2. **O motivo não é enfeite**: ele decide o tipo do movimento, e o tipo
+       decide se aquilo custa dinheiro no balanço (perda custa, contagem não).
     """
 
     def __init__(self, session, produto=None, pai=None):
         super().__init__(pai)
         self.session = session
-        self.setWindowTitle("Ajuste de estoque")
+        self.setWindowTitle("Movimentar estoque")
         self.setMinimumWidth(620)
 
         lay = QVBoxLayout(self)
         lay.setSpacing(12)
-        lay.addWidget(titulo("Ajuste de estoque"))
+        lay.addWidget(titulo("Movimentar estoque"))
         lay.addWidget(regua())
         lay.addWidget(dica(
-            "Use aqui o que saiu sem venda: quebrou, sumiu, virou brinde — "
-            "ou o resultado de uma contagem na prateleira."
+            "O que entrou ou saiu sem ser venda: quebrou, sumiu, virou brinde — "
+            "ou o resultado de uma contagem na prateleira. Kit pode ser lançado "
+            "inteiro: os itens dele saem na proporção certa."
         ))
 
         form = QFormLayout()
         self.combo = QComboBox()
         self.combo.setEditable(True)
         self.combo.setInsertPolicy(QComboBox.NoInsert)
-        for p in repo.buscar(session, tipo=TipoProduto.SIMPLES):
-            self.combo.addItem(f"{p.rotulo}  ({p.sku})", p.id)
-        if produto is not None and not produto.eh_kit:
+        for p in repo.buscar(session):
+            # o sufixo é o que distingue kit de item numa lista de texto puro,
+            # onde o peso da letra (o recurso usado nas tabelas) não existe
+            sufixo = "  ·  kit" if p.eh_kit else ""
+            self.combo.addItem(f"{p.rotulo}  ({p.sku}){sufixo}", p.id)
+        if produto is not None:
             indice = self.combo.findData(produto.id)
             if indice >= 0:
                 self.combo.setCurrentIndex(indice)
@@ -342,7 +396,7 @@ class DialogoAjuste(QDialog):
         # ("…cartável Médio (m)"), e ela não reconhece o produto (mesmo motivo do
         # setCursorPosition(0) da tela do produto)
         self.combo.lineEdit().setCursorPosition(0)
-        self.combo.currentIndexChanged.connect(self._atualizar_saldo)
+        self.combo.currentIndexChanged.connect(self._trocou_produto)
 
         self.motivo = QComboBox()
         for codigo, (rotulo, _tipo, _modo) in ledger.MOTIVOS_AJUSTE.items():
@@ -352,11 +406,12 @@ class DialogoAjuste(QDialog):
         self.qtd = QSpinBox()
         self.qtd.setRange(0, 999999)
         self.qtd.setValue(1)
+        self.qtd.valueChanged.connect(self._atualizar_saldo)
 
         self.descricao = QLineEdit()
         self.descricao.setPlaceholderText("o que aconteceu (opcional, mas ajuda depois)")
 
-        form.addRow("Produto", self.combo)
+        form.addRow("Produto ou kit", self.combo)
         form.addRow("O que aconteceu", self.motivo)
         form.addRow("Quantidade", self.qtd)
         form.addRow("Detalhe", self.descricao)
@@ -370,29 +425,54 @@ class DialogoAjuste(QDialog):
         rodape.addStretch(1)
         bt_cancelar = QPushButton("Cancelar")
         bt_cancelar.clicked.connect(self.reject)
-        bt_ok = QPushButton("Registrar ajuste")
+        bt_ok = QPushButton("Registrar movimentação")
         bt_ok.setObjectName("primario")
         bt_ok.clicked.connect(self._salvar)
         rodape.addWidget(bt_cancelar)
         rodape.addWidget(bt_ok)
         lay.addLayout(rodape)
 
-        self._atualizar_saldo()
+        self._trocou_produto()
 
     def _produto(self):
         pid = self.combo.currentData()
         return self.session.get(Produto, pid) if pid is not None else None
+
+    # ------------------------------------------------------------------ motivos
+
+    def _trocou_produto(self):
+        """Contar a prateleira não vale para kit — kit não fica na prateleira."""
+        produto = self._produto()
+        eh_kit = produto is not None and produto.eh_kit
+        modelo = self.motivo.model()
+        for i in range(self.motivo.count()):
+            _rotulo, _tipo, modo = ledger.MOTIVOS_AJUSTE[self.motivo.itemData(i)]
+            vale = not (eh_kit and modo == "exato")
+            modelo.item(i).setEnabled(vale)
+            if not vale and self.motivo.currentIndex() == i:
+                self.motivo.setCurrentIndex(0)
+        self._atualizar_saldo()
+
+    def _modo(self) -> str:
+        return ledger.MOTIVOS_AJUSTE[self.motivo.currentData()][2]
 
     def _atualizar_saldo(self):
         produto = self._produto()
         if produto is None:
             self.lb_efeito.setText("")
             return
+        modo = self._modo()
+        if produto.eh_kit:
+            self.lb_efeito.setText(self._efeito_do_kit(produto, modo))
+            return
+
         saldo = ledger.saldo_de(self.session, produto)
-        _rotulo, _tipo, modo = ledger.MOTIVOS_AJUSTE[self.motivo.currentData()]
-        self.qtd.setPrefix("")
         if modo == "exato":
+            # sem bloquear o sinal, escrever o saldo aqui reentra em
+            # `_atualizar_saldo` pelo `valueChanged` que a prévia do kit usa
+            self.qtd.blockSignals(True)
             self.qtd.setValue(saldo)
+            self.qtd.blockSignals(False)
             self.lb_efeito.setText(
                 f"{produto.rotulo} está com {saldo} no sistema. "
                 "Digite quanto tem de verdade na prateleira."
@@ -406,13 +486,36 @@ class DialogoAjuste(QDialog):
                 + (f" e entram no balanço como perda de {moeda(custo)}." if custo else ".")
             )
 
+    def _efeito_do_kit(self, kit, modo: str) -> str:
+        """Mostra a conta ANTES de lançar: é o que ela não conseguia fazer de cabeça."""
+        comps = kits.componentes_de(self.session, kit)
+        if not comps:
+            return (
+                f"{kit.rotulo} ainda não tem composição. "
+                "Defina de que ele é montado antes de movimentá-lo."
+            )
+        unidades = self.qtd.value()
+        sinal = "+" if modo == "entrada" else "−"
+        detalhe = ", ".join(
+            f"{sinal}{c.quantidade * unidades} {c.componente.rotulo}" for c in comps[:4]
+        )
+        resto = f" e mais {len(comps) - 4}" if len(comps) > 4 else ""
+        verbo = "entram" if modo == "entrada" else "saem"
+        return (
+            f"{kit.rotulo} é um kit: o estoque dele são os itens. "
+            f"Vou lançar {len(comps)} movimento(s) com o mesmo motivo — "
+            f"{detalhe}{resto} — e essas unidades {verbo} do estoque."
+        )
+
+    # -------------------------------------------------------------------- ação
+
     def _salvar(self):
         produto = self._produto()
         if produto is None:
-            avisar(self, "Escolha o produto", "Preciso saber qual produto ajustar.")
+            avisar(self, "Escolha o produto", "Preciso saber o que movimentar.")
             return
         try:
-            mov = ledger.ajuste_manual(
+            resultado = ledger.movimento_manual(
                 self.session, produto, self.motivo.currentData(), self.qtd.value(),
                 descricao=self.descricao.text(),
             )
@@ -422,24 +525,135 @@ class DialogoAjuste(QDialog):
             avisar(self, "Não consegui registrar", str(exc))
             return
 
-        if mov is None:
+        if resultado.nada_mudou:
             informar(self, "Nada mudou",
                      "O sistema já estava com essa quantidade — não precisei ajustar nada.")
             self.accept()
             return
 
-        travados = [
-            k.rotulo for k in kits.kits_afetados(self.session, produto)
-            if kits.disponivel(self.session, k).quantidade <= 0
+        informar(self, "Movimentação registrada", self._resumo(resultado))
+        self.accept()
+
+    def _resumo(self, resultado) -> str:
+        linhas = [
+            f"  • {m.produto.rotulo}: {m.quantidade:+d} — ficou com {m.saldo_apos}"
+            for m in resultado.movimentos
         ]
-        msg = (f"{produto.rotulo}: {mov.quantidade:+d} unidade(s). "
-               f"Agora tem {mov.saldo_apos}.")
+        if resultado.produto.eh_kit:
+            cabeca = (
+                f"{resultado.unidades} × {resultado.produto.rotulo} "
+                f"({resultado.motivo}). Lancei nos itens do kit:"
+            )
+        else:
+            cabeca = f"{resultado.produto.rotulo} ({resultado.motivo}):"
+
+        travados = [
+            k.rotulo for k in self._kits_travados(resultado)
+        ]
+        msg = cabeca + "\n" + "\n".join(linhas)
         if travados:
             msg += "\n\nIsso deixou sem poder montar:\n" + "\n".join(
                 f"  • {t}" for t in travados[:5]
             )
-        informar(self, "Ajuste registrado", msg)
-        self.accept()
+        return msg
+
+    def _kits_travados(self, resultado) -> list:
+        """Kits que ficaram em zero por causa desta movimentação (§5.2.4)."""
+        vistos, travados = set(), []
+        for mov in resultado.movimentos:
+            for k in kits.kits_afetados(self.session, mov.produto):
+                if k.id in vistos:
+                    continue
+                vistos.add(k.id)
+                if kits.disponivel(self.session, k).quantidade <= 0:
+                    travados.append(k)
+        return travados
+
+
+class DialogoMovimentacoes(QDialog):
+    """O livro-razão na tela — auditoria do estoque (§4.1).
+
+    Todo movimento passa pelo ledger, mas até aqui só dava para vê-los abrindo
+    produto por produto. Esta lista responde "o que aconteceu com o estoque",
+    incluindo o motivo escrito à mão em cada ajuste.
+    """
+
+    def __init__(self, session, pai=None):
+        super().__init__(pai)
+        self.session = session
+        self.setWindowTitle("Movimentações do estoque")
+        self.setMinimumSize(940, 520)
+
+        lay = QVBoxLayout(self)
+        lay.addWidget(titulo("Movimentações do estoque"))
+        lay.addWidget(regua())
+        lay.addWidget(dica(
+            "Tudo o que entrou e saiu, do mais novo para o mais antigo. "
+            "A busca também procura no motivo do ajuste."
+        ))
+
+        topo = QHBoxLayout()
+        topo.setSpacing(10)
+        self.busca = QLineEdit()
+        self.busca.setObjectName("busca")
+        self.busca.setPlaceholderText("Procurar por produto, código ou motivo…")
+        self.busca.setClearButtonEnabled(True)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(180)
+        self._timer.timeout.connect(self.recarregar)
+        self.busca.textChanged.connect(lambda _: self._timer.start())
+
+        self.so_manuais = QCheckBox("Só o que foi lançado à mão")
+        self.so_manuais.stateChanged.connect(self.recarregar)
+
+        topo.addWidget(self.busca, 1)
+        topo.addWidget(self.so_manuais)
+        lay.addLayout(topo)
+
+        self.tabela = QTableWidget(0, 6)
+        self.tabela.setHorizontalHeaderLabels(
+            ["Quando", "Produto", "O que foi", "Quantidade", "Ficou com", "Motivo"]
+        )
+        self.tabela.verticalHeader().setVisible(False)
+        self.tabela.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.tabela.verticalHeader().setDefaultSectionSize(38)
+        configurar_colunas(self.tabela, [140, 240, None, "auto", "auto", 260])
+        lay.addWidget(self.tabela, 1)
+
+        self.rodape = dica("")
+        lay.addWidget(self.rodape)
+
+        fechar = QPushButton("Fechar")
+        fechar.clicked.connect(self.accept)
+        linha_fim = QHBoxLayout()
+        linha_fim.addStretch(1)
+        linha_fim.addWidget(fechar)
+        lay.addLayout(linha_fim)
+        self.recarregar()
+
+    def recarregar(self):
+        movs = ledger.movimentacoes(
+            self.session,
+            texto=self.busca.text(),
+            apenas_manuais=self.so_manuais.isChecked(),
+        )
+        self.tabela.setRowCount(0)
+        for mov in movs:
+            i = self.tabela.rowCount()
+            self.tabela.insertRow(i)
+            quando = mov.data_evento or mov.criado_em
+            self.tabela.setItem(i, 0, celula(f"{quando:%d/%m/%Y %H:%M}"))
+            self.tabela.setItem(i, 1, celula(mov.produto.rotulo, mov.produto.sku))
+            self.tabela.setItem(i, 2, celula(ledger.descrever(mov)))
+            self.tabela.setItem(i, 3, celula_numero(f"{mov.quantidade:+d}"))
+            self.tabela.setItem(i, 4, celula_numero(str(mov.saldo_apos)))
+            self.tabela.setItem(i, 5, celula(mov.observacao or ""))
+
+        self.rodape.setText(
+            f"{len(movs)} movimentação(ões) — as mais recentes primeiro."
+            if movs else "Nenhuma movimentação encontrada."
+        )
 
 
 class DialogoDespesa(QDialog):
